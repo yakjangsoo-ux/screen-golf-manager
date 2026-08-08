@@ -152,9 +152,21 @@
 <body>
 <h1>🏌️ 스크린골프 일지 정산</h1>
 <div id="app"></div>
-<footer>모든 데이터는 이 컴퓨터의 브라우저(localStorage)에 자동 저장됩니다.</footer>
+<footer>모든 데이터는 클라우드(Firestore)에 자동 저장되어 어느 기기에서 접속해도 동일하게 보입니다.</footer>
 
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
 <script>
+const FIREBASE_CONFIG = {
+  projectId: "screen-golf-manager",
+  appId: "1:94940029914:web:698ed0da783773838596e3",
+  storageBucket: "screen-golf-manager.firebasestorage.app",
+  apiKey: "AIzaSyA5MhepW5yZ_hLD16POQsnXB_7j4zgDFAM",
+  authDomain: "screen-golf-manager.firebaseapp.com",
+  messagingSenderId: "94940029914",
+};
+let db; // set in init() after firebase.initializeApp()
+
 const ROOMS = ['R1','R2','R3','R5','R6','R7','R8','R9'];
 const ROOM_LABEL = { R9: 'R9 (지하1층)' };
 // Per-room tint for the 상황판(board): a stronger shade for the room-name
@@ -208,10 +220,7 @@ function endTimeOptions(start){
   return opts;
 }
 function toMinutes(t){ const [h,m] = t.split(':').map(Number); return h*60+m; }
-const ADMIN_HASH_KEY = STORAGE_PREFIX + 'admin_hash';
 const SESSION_KEY = STORAGE_PREFIX + 'session';
-const STAFF_KEY = STORAGE_PREFIX + 'staff';
-const AUDIT_KEY = STORAGE_PREFIX + 'audit';
 const DEFAULT_ADMIN_PASSWORD = 'daesung1!';
 const AUDIT_TYPE_LABEL = {
   STAFF_CHANGE: '담당자 변경(교대 인수인계)',
@@ -241,7 +250,6 @@ function weekdayLabel(dateStr){
 }
 function fmt(n){ return (Number(n)||0).toLocaleString('ko-KR'); }
 
-function KEY(date){ return STORAGE_PREFIX + date; }
 function blankLog(date){
   return {
     date, staff:'',
@@ -249,35 +257,32 @@ function blankLog(date){
     practice: [],
   };
 }
-function loadLog(date){
-  const raw = localStorage.getItem(KEY(date));
-  if(!raw) return blankLog(date);
+// Shared by the single-date load path and the list-view batch prefetch.
+function normalizeLog(parsed){
+  ROOMS.forEach(r=>{
+    if(!parsed.rooms[r]) parsed.rooms[r]=[];
+    // Visits saved before "작성자 기록" existed have no createdBy — best-guess
+    // it as whoever this date's 담당자 was at the time, so cross-staff edits
+    // on old data can still be detected instead of silently going unlogged.
+    parsed.rooms[r].forEach(v=>{ if(!v.createdBy) v.createdBy = parsed.staff || ''; });
+  });
+  if(!parsed.practice) parsed.practice=[];
+  return parsed;
+}
+async function loadLog(date){
   try{
-    const parsed = JSON.parse(raw);
-    ROOMS.forEach(r=>{
-      if(!parsed.rooms[r]) parsed.rooms[r]=[];
-      // Visits saved before "작성자 기록" existed have no createdBy — best-guess
-      // it as whoever this date's 담당자 was at the time, so cross-staff edits
-      // on old data can still be detected instead of silently going unlogged.
-      parsed.rooms[r].forEach(v=>{ if(!v.createdBy) v.createdBy = parsed.staff || ''; });
-    });
-    if(!parsed.practice) parsed.practice=[];
-    return parsed;
-  }catch(e){ return blankLog(date); }
+    const snap = await db.collection('logs').doc(date).get();
+    return snap.exists ? normalizeLog(snap.data()) : blankLog(date);
+  }catch(e){ console.warn('일지 불러오기 실패:', e); return blankLog(date); }
 }
 function saveLog(log){
-  localStorage.setItem(KEY(log.date), JSON.stringify(log));
+  // Fire-and-forget: state.log in memory is already the source of truth for
+  // this session, so callers don't need to wait on the write to finish.
+  db.collection('logs').doc(log.date).set(log).catch(err=>console.warn('일지 저장 실패:', err));
   writeLogToFolder(log); // best-effort mirror to a real file, if a data folder is connected
 }
 function deleteLogDate(date){
-  localStorage.removeItem(KEY(date));
-}
-function listAllDates(){
-  return Object.keys(localStorage)
-    .filter(k=>k.startsWith(STORAGE_PREFIX))
-    .map(k=>k.slice(STORAGE_PREFIX.length))
-    .filter(d=>/^\d{4}-\d{2}-\d{2}$/.test(d))
-    .sort();
+  return db.collection('logs').doc(date).delete();
 }
 
 // ---------- admin auth ----------
@@ -286,9 +291,17 @@ async function sha256(text){
   const buf = await crypto.subtle.digest('SHA-256', enc);
   return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
 }
+const ADMIN_DOC = () => db.collection('config').doc('admin');
+async function getAdminHash(){
+  const snap = await ADMIN_DOC().get();
+  return snap.exists ? snap.data().hash : null;
+}
+function setAdminHash(hash){
+  return ADMIN_DOC().set({ hash });
+}
 async function ensureAdminHash(){
-  if(!localStorage.getItem(ADMIN_HASH_KEY)){
-    localStorage.setItem(ADMIN_HASH_KEY, await sha256(DEFAULT_ADMIN_PASSWORD));
+  if(!(await getAdminHash())){
+    await setAdminHash(await sha256(DEFAULT_ADMIN_PASSWORD));
   }
 }
 async function attemptLogin(id, pw){
@@ -296,7 +309,7 @@ async function attemptLogin(id, pw){
   if(!id || !pw){ alert('아이디와 비밀번호를 입력하세요.'); return; }
   if(id === 'admin'){
     const hash = await sha256(pw);
-    if(hash === localStorage.getItem(ADMIN_HASH_KEY)){
+    if(hash === await getAdminHash()){
       session = { role:'admin', name:'admin' };
       sessionStorage.setItem(SESSION_KEY, JSON.stringify(session));
       state.view = 'edit';
@@ -306,7 +319,7 @@ async function attemptLogin(id, pw){
     }
     return;
   }
-  const staffAcct = getStaffList().find(s=>s.name===id);
+  const staffAcct = (await getStaffList()).find(s=>s.name===id);
   if(!staffAcct){
     alert('등록되지 않은 이름입니다. 관리자에게 계정 등록을 요청하세요.');
     return;
@@ -327,77 +340,77 @@ function logout(){
   state.view = 'edit';
   render();
 }
-function changeAdminPassword(){
+async function changeAdminPassword(){
   const oldPw = prompt('현재 비밀번호를 입력하세요');
   if(oldPw===null) return;
-  sha256(oldPw).then(hash=>{
-    if(hash !== localStorage.getItem(ADMIN_HASH_KEY)){ alert('현재 비밀번호가 올바르지 않습니다.'); return; }
-    const newPw = prompt('새 비밀번호를 입력하세요');
-    if(newPw===null || newPw.trim()==='') return;
-    const confirmPw = prompt('새 비밀번호를 한 번 더 입력하세요');
-    if(confirmPw !== newPw){ alert('입력한 두 비밀번호가 서로 다릅니다. 다시 시도해주세요.'); return; }
-    sha256(newPw).then(newHash=>{
-      localStorage.setItem(ADMIN_HASH_KEY, newHash);
-      addAudit(state.currentDate, 'PASSWORD_CHANGE', '관리자 비밀번호가 변경됨');
-      alert('비밀번호가 변경되었습니다.');
-      render();
-    });
-  });
+  const hash = await sha256(oldPw);
+  if(hash !== await getAdminHash()){ alert('현재 비밀번호가 올바르지 않습니다.'); return; }
+  const newPw = prompt('새 비밀번호를 입력하세요');
+  if(newPw===null || newPw.trim()==='') return;
+  const confirmPw = prompt('새 비밀번호를 한 번 더 입력하세요');
+  if(confirmPw !== newPw){ alert('입력한 두 비밀번호가 서로 다릅니다. 다시 시도해주세요.'); return; }
+  await setAdminHash(await sha256(newPw));
+  addAudit(state.currentDate, 'PASSWORD_CHANGE', '관리자 비밀번호가 변경됨');
+  alert('비밀번호가 변경되었습니다.');
+  render();
 }
 
 // ---------- staff accounts (admin-managed) ----------
-function getStaffList(){
-  try{ return JSON.parse(localStorage.getItem(STAFF_KEY) || '[]'); }catch(e){ return []; }
+async function getStaffList(){
+  const snap = await db.collection('staff').get();
+  return snap.docs.map(d=>d.data());
 }
-function saveStaffList(list){
-  localStorage.setItem(STAFF_KEY, JSON.stringify(list));
+function setStaffDoc(staff){
+  return db.collection('staff').doc(staff.id).set(staff);
+}
+function deleteStaffDoc(id){
+  return db.collection('staff').doc(id).delete();
 }
 async function addStaffAccount(){
   const name = prompt('추가할 직원 이름을 입력하세요');
   if(name===null || name.trim()==='') return;
   const trimmed = name.trim();
-  if(trimmed === 'admin' || getStaffList().some(s=>s.name===trimmed)){
+  if(trimmed === 'admin' || state.adminData.staffList.some(s=>s.name===trimmed)){
     alert('이미 사용 중인 이름입니다.');
     return;
   }
   const pw = prompt(`"${trimmed}"님의 초기 비밀번호를 입력하세요`);
   if(pw===null || pw.trim()==='') return;
-  const list = getStaffList();
-  list.push({ id: uid(), name: trimmed, passwordHash: await sha256(pw) });
-  saveStaffList(list);
+  const staff = { id: uid(), name: trimmed, passwordHash: await sha256(pw) };
+  await setStaffDoc(staff);
+  state.adminData.staffList.push(staff);
   addAudit('-', 'STAFF_ADDED', `직원 "${trimmed}" 추가됨`);
   render();
 }
 async function resetStaffPassword(id){
-  const list = getStaffList();
-  const s = list.find(x=>x.id===id);
+  const s = state.adminData.staffList.find(x=>x.id===id);
   if(!s) return;
   const pw = prompt(`"${s.name}"님의 새 비밀번호를 입력하세요`);
   if(pw===null || pw.trim()==='') return;
   s.passwordHash = await sha256(pw);
-  saveStaffList(list);
+  await setStaffDoc(s);
   addAudit('-', 'STAFF_PW_RESET', `직원 "${s.name}" 비밀번호 재설정됨`);
   alert('비밀번호가 변경되었습니다.');
   render();
 }
-function removeStaffAccount(id){
-  const list = getStaffList();
-  const s = list.find(x=>x.id===id);
+async function removeStaffAccount(id){
+  const s = state.adminData.staffList.find(x=>x.id===id);
   if(!s) return;
   if(!confirm(`직원 "${s.name}" 계정을 삭제할까요? 이 직원은 더 이상 로그인할 수 없습니다.`)) return;
-  saveStaffList(list.filter(x=>x.id!==id));
+  await deleteStaffDoc(id);
+  state.adminData.staffList = state.adminData.staffList.filter(x=>x.id!==id);
   addAudit('-', 'STAFF_REMOVED', `직원 "${s.name}" 삭제됨`);
   render();
 }
 
 // ---------- audit log ----------
-function getAudit(){
-  try{ return JSON.parse(localStorage.getItem(AUDIT_KEY) || '[]'); }catch(e){ return []; }
-}
 function addAudit(date, type, detail){
-  const list = getAudit();
-  list.push({ ts: new Date().toISOString(), date, type, detail });
-  localStorage.setItem(AUDIT_KEY, JSON.stringify(list));
+  db.collection('audit').add({ ts: new Date().toISOString(), date, type, detail })
+    .catch(err=>console.warn('감사 로그 기록 실패:', err));
+}
+async function getAudit(){
+  const snap = await db.collection('audit').orderBy('ts','desc').get();
+  return snap.docs.map(d=>d.data());
 }
 function commitStaffAudit(newVal, prevVal){
   if(prevVal !== undefined && prevVal.trim() !== '' && prevVal !== newVal){
@@ -534,13 +547,14 @@ async function writeLogToFolder(log){
 }
 
 let state = {
-  view: 'edit', // 'edit' | 'list'
+  view: 'edit', // 'edit' | 'list' | 'admin'
   currentDate: todayStr(),
-  log: null,
+  log: null, // populated async by init()
   activeRoom: 'R1',
   listMonth: null,
+  listData: null, // { dates, logsByDate } — prefetched when entering list view
+  adminData: null, // { staffList, audit } — prefetched when entering admin view
 };
-state.log = loadLog(state.currentDate);
 let collapsedVisits = new Set(); // UI-only: which visit cards are folded (not persisted)
 let bookingDialog = null; // { room, start } while the board's "new booking" modal is open
 
@@ -588,9 +602,11 @@ setInterval(()=>{
 
 // ---------- mutation helpers ----------
 // (all mutations respect isLocked()/guardEdit() — see "day close / lock" section above)
-function changeDate(v){
+async function changeDate(v){
   state.currentDate = v;
-  state.log = loadLog(v);
+  state.log = null;
+  render();
+  state.log = await loadLog(v);
   render();
 }
 function addVisit(room){
@@ -817,9 +833,30 @@ function render(){
   if(!session){ app.innerHTML = renderLogin(); return; }
   if(state.view==='admin' && !isAdmin()) state.view = 'edit'; // staff can't reach the admin page
   if(state.view==='list' && !isAdmin()) state.view = 'edit'; // 조회/통계 is admin-only
+  if(state.view==='edit' && !state.log){ app.innerHTML = '<p style="padding:20px;color:#888;">불러오는 중...</p>'; return; }
+  if(state.view==='list' && !state.listData){ app.innerHTML = '<p style="padding:20px;color:#888;">불러오는 중...</p>'; return; }
+  if(state.view==='admin' && !state.adminData){ app.innerHTML = '<p style="padding:20px;color:#888;">불러오는 중...</p>'; return; }
   if(state.view==='edit') app.innerHTML = renderEditView();
   else if(state.view==='list') app.innerHTML = renderListView();
   else if(state.view==='admin') app.innerHTML = renderAdminView();
+}
+async function openListView(){
+  state.view = 'list';
+  state.listData = null;
+  render();
+  const snap = await db.collection('logs').get();
+  const logsByDate = {};
+  snap.forEach(doc => logsByDate[doc.id] = normalizeLog(doc.data()));
+  state.listData = { dates: Object.keys(logsByDate).filter(d=>/^\d{4}-\d{2}-\d{2}$/.test(d)).sort(), logsByDate };
+  render();
+}
+async function openAdminView(){
+  state.view = 'admin';
+  state.adminData = null;
+  render();
+  const [staffList, audit] = await Promise.all([getStaffList(), getAudit()]);
+  state.adminData = { staffList, audit };
+  render();
 }
 
 function renderLogin(){
@@ -853,8 +890,8 @@ function renderNav(){
     <div class="view-toggle">
       <button class="btn ${state.view==='edit'?'primary':''}" onclick="state.view='edit';render()">✏️ 일지 입력</button>
       ${isAdmin() ? `
-        <button class="btn ${state.view==='list'?'primary':''}" onclick="state.view='list';render()">📊 조회/통계</button>
-        <button class="btn ${state.view==='admin'?'primary':''}" onclick="state.view='admin';render()">🛠 관리자 페이지</button>
+        <button class="btn ${state.view==='list'?'primary':''}" onclick="openListView()">📊 조회/통계</button>
+        <button class="btn ${state.view==='admin'?'primary':''}" onclick="openAdminView()">🛠 관리자 페이지</button>
       ` : ''}
       <div class="spacer"></div>
       <span class="autosave-badge">👤 ${escHtml(session.name)}${isAdmin()?' (관리자)':''}</span>
@@ -1144,7 +1181,7 @@ function renderSummaryTable(summary){
 
 // ---------- list / stats view ----------
 function renderListView(){
-  const dates = listAllDates();
+  const { dates, logsByDate } = state.listData;
   const months = Array.from(new Set(dates.map(d=>d.slice(0,7)))).sort().reverse();
   if(!state.listMonth || !months.includes(state.listMonth)){
     state.listMonth = months[0] || state.currentDate.slice(0,7);
@@ -1155,7 +1192,7 @@ function renderListView(){
   let monthSg=0, monthBirdie=0;
   const roomMonthTotals = Object.fromEntries(ROOMS.map(r=>[r,{cash:0,card:0,transfer:0}]));
   const rows = monthDates.map(d=>{
-    const log = loadLog(d);
+    const log = logsByDate[d];
     const s = computeSummary(log);
     monthTotals.cash+=s.totals.cash; monthTotals.card+=s.totals.card; monthTotals.transfer+=s.totals.transfer;
     monthSg += s.sgTotal; monthBirdie += s.birdieTotal;
@@ -1216,14 +1253,16 @@ function renderListView(){
   `;
 }
 
-function loadDateIntoEditor(date){
+async function loadDateIntoEditor(date){
   state.currentDate = date;
-  state.log = loadLog(date);
+  state.log = null;
   state.view = 'edit';
   render();
+  state.log = await loadLog(date); // fresh read, not the list-view snapshot — another device may have changed it since
+  render();
 }
-function deleteDateRow(date){
-  const log = loadLog(date);
+async function deleteDateRow(date){
+  const log = await loadLog(date); // fresh read, not the list-view snapshot
   if(log.closed && !isAdmin()){
     alert('마감된 일지는 관리자만 삭제할 수 있습니다.');
     return;
@@ -1232,7 +1271,9 @@ function deleteDateRow(date){
   if(log.closed && isAdmin()){
     addAudit(date, 'ADMIN_EDIT_ON_CLOSED', '관리자가 마감된 일지를 삭제함');
   }
-  deleteLogDate(date);
+  await deleteLogDate(date);
+  state.listData.dates = state.listData.dates.filter(d=>d!==date);
+  delete state.listData.logsByDate[date];
   render();
 }
 
@@ -1241,13 +1282,12 @@ function renderAdminView(){
   if(!isAdmin()){
     return `${renderNav()}<div class="summary"><p>관리자 로그인이 필요합니다.</p></div>`;
   }
-  const staffList = getStaffList();
-  const audit = getAudit().slice().reverse();
+  const { staffList, audit } = state.adminData;
   return `
     ${renderNav()}
     <div class="summary" style="margin-bottom:14px;">
       <h2>🔑 관리자 비밀번호</h2>
-      <p style="font-size:13px;color:#666;">비밀번호는 이 브라우저에만 저장됩니다. 다른 컴퓨터에서는 적용되지 않습니다.</p>
+      <p style="font-size:13px;color:#666;">비밀번호는 모든 기기에 공통으로 적용됩니다.</p>
       <button class="btn" onclick="changeAdminPassword()">비밀번호 변경</button>
     </div>
 
@@ -1285,12 +1325,15 @@ function escHtml(s){ return String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'
 function escAttr(s){ return escHtml(s); }
 
 (async function init(){
+  firebase.initializeApp(FIREBASE_CONFIG);
+  db = firebase.firestore();
   await ensureAdminHash();
   try{
     const saved = sessionStorage.getItem(SESSION_KEY);
     if(saved) session = JSON.parse(saved);
   }catch(e){ session = null; }
   await initDataFolder();
+  state.log = await loadLog(state.currentDate);
   render();
 })();
 </script>
