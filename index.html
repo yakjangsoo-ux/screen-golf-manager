@@ -269,16 +269,21 @@ function normalizeLog(parsed){
   if(!parsed.practice) parsed.practice=[];
   return parsed;
 }
+// Deliberately does NOT catch read errors here — a transient network failure
+// must never be silently treated as "this date has no data", because that
+// blank stand-in would then get written back over the real document by the
+// next save. Callers must catch and keep whatever was already on screen.
 async function loadLog(date){
-  try{
-    const snap = await db.collection('logs').doc(date).get();
-    return snap.exists ? normalizeLog(snap.data()) : blankLog(date);
-  }catch(e){ console.warn('일지 불러오기 실패:', e); return blankLog(date); }
+  const snap = await db.collection('logs').doc(date).get();
+  return snap.exists ? normalizeLog(snap.data()) : blankLog(date);
 }
 function saveLog(log){
   // Fire-and-forget: state.log in memory is already the source of truth for
-  // this session, so callers don't need to wait on the write to finish.
-  db.collection('logs').doc(log.date).set(log).catch(err=>console.warn('일지 저장 실패:', err));
+  // this session, so callers don't need to wait on the write to finish. A
+  // failure is surfaced via the "마지막 저장" badge (see markSaveFailed) so
+  // staff notice instead of unknowingly working on data that never made it
+  // to the server.
+  db.collection('logs').doc(log.date).set(log).catch(err=>{ console.warn('일지 저장 실패:', err); markSaveFailed(); });
 }
 function deleteLogDate(date){
   return db.collection('logs').doc(date).delete();
@@ -492,7 +497,13 @@ let lastSavedAt = null;
 function markSaved(){
   lastSavedAt = new Date();
   const badge = document.getElementById('lastSavedBadge');
-  if(badge) badge.textContent = '✔ 마지막 저장 ' + lastSavedAt.toLocaleTimeString('ko-KR');
+  if(badge){ badge.textContent = '✔ 마지막 저장 ' + lastSavedAt.toLocaleTimeString('ko-KR'); badge.style.color = ''; }
+}
+// A save failed to reach Firestore (e.g. network drop) — flip the badge into
+// a visible warning instead of leaving staff thinking everything saved fine.
+function markSaveFailed(){
+  const badge = document.getElementById('lastSavedBadge');
+  if(badge){ badge.textContent = '⚠ 저장 실패 - 인터넷 연결을 확인하세요'; badge.style.color = 'var(--danger)'; }
 }
 // Whoever is logged in as staff and actually edits a day's log becomes its
 // recorded 담당자 — this replaces manually typing a name, and doubles as
@@ -530,10 +541,17 @@ setInterval(()=>{
 // ---------- mutation helpers ----------
 // (all mutations respect isLocked()/guardEdit() — see "day close / lock" section above)
 async function changeDate(v){
+  const prevDate = state.currentDate, prevLog = state.log;
   state.currentDate = v;
   state.log = null;
   render();
-  state.log = await loadLog(v);
+  try{
+    state.log = await loadLog(v);
+  }catch(e){
+    alert('일지를 불러오지 못했습니다. 인터넷 연결을 확인하고 다시 시도해주세요.');
+    state.currentDate = prevDate;
+    state.log = prevLog; // never leave the screen on a blank stand-in that could get saved over the real data
+  }
   render();
 }
 function addVisit(room){
@@ -813,18 +831,28 @@ async function openListView(){
   state.view = 'list';
   state.listData = null;
   render();
-  const snap = await db.collection('logs').get();
-  const logsByDate = {};
-  snap.forEach(doc => logsByDate[doc.id] = normalizeLog(doc.data()));
-  state.listData = { dates: Object.keys(logsByDate).filter(d=>/^\d{4}-\d{2}-\d{2}$/.test(d)).sort(), logsByDate };
+  try{
+    const snap = await db.collection('logs').get();
+    const logsByDate = {};
+    snap.forEach(doc => logsByDate[doc.id] = normalizeLog(doc.data()));
+    state.listData = { dates: Object.keys(logsByDate).filter(d=>/^\d{4}-\d{2}-\d{2}$/.test(d)).sort(), logsByDate };
+  }catch(e){
+    alert('조회/통계 데이터를 불러오지 못했습니다. 인터넷 연결을 확인하고 다시 시도해주세요.');
+    state.view = 'edit';
+  }
   render();
 }
 async function openAdminView(){
   state.view = 'admin';
   state.adminData = null;
   render();
-  const [staffList, audit] = await Promise.all([getStaffList(), getAudit()]);
-  state.adminData = { staffList, audit };
+  try{
+    const [staffList, audit] = await Promise.all([getStaffList(), getAudit()]);
+    state.adminData = { staffList, audit };
+  }catch(e){
+    alert('관리자 페이지 데이터를 불러오지 못했습니다. 인터넷 연결을 확인하고 다시 시도해주세요.');
+    state.view = 'edit';
+  }
   render();
 }
 
@@ -1273,11 +1301,22 @@ async function loadDateIntoEditor(date){
   state.log = null;
   state.view = 'edit';
   render();
-  state.log = await loadLog(date); // fresh read, not the list-view snapshot — another device may have changed it since
+  try{
+    state.log = await loadLog(date); // fresh read, not the list-view snapshot — another device may have changed it since
+  }catch(e){
+    alert('일지를 불러오지 못했습니다. 인터넷 연결을 확인하고 다시 시도해주세요.');
+    state.view = 'list'; // back to a view that still has state.listData, rather than stranding on a blank editor
+  }
   render();
 }
 async function deleteDateRow(date){
-  const log = await loadLog(date); // fresh read, not the list-view snapshot
+  let log;
+  try{
+    log = await loadLog(date); // fresh read, not the list-view snapshot
+  }catch(e){
+    alert('일지 상태를 확인하지 못했습니다. 인터넷 연결을 확인하고 다시 시도해주세요.');
+    return;
+  }
   if(log.closed && !isAdmin()){
     alert('마감된 일지는 관리자만 삭제할 수 있습니다.');
     return;
@@ -1345,10 +1384,15 @@ async function exportRangeToExcel(start, end){
     return;
   }
   const wb = XLSX.utils.book_new();
-  for(const date of dates){
-    const log = await loadLog(date);
-    const summary = computeSummary(log);
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(buildDateSheetRows(log, summary)), date);
+  try{
+    for(const date of dates){
+      const log = await loadLog(date);
+      const summary = computeSummary(log);
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(buildDateSheetRows(log, summary)), date);
+    }
+  }catch(e){
+    alert('일지를 불러오지 못해 엑셀 출력을 중단했습니다. 인터넷 연결을 확인하고 다시 시도해주세요.');
+    return;
   }
   const filename = start === end ? `${start}_스크린골프정산.xlsx` : `${start}~${end}_스크린골프정산.xlsx`;
   XLSX.writeFile(wb, filename);
@@ -1414,13 +1458,20 @@ function escAttr(s){ return escHtml(s); }
 (async function init(){
   firebase.initializeApp(FIREBASE_CONFIG);
   db = firebase.firestore();
-  await ensureAdminHash();
   try{
-    const saved = sessionStorage.getItem(SESSION_KEY);
-    if(saved) session = JSON.parse(saved);
-  }catch(e){ session = null; }
-  state.log = await loadLog(state.currentDate);
-  render();
+    await ensureAdminHash();
+    try{
+      const saved = sessionStorage.getItem(SESSION_KEY);
+      if(saved) session = JSON.parse(saved);
+    }catch(e){ session = null; }
+    state.log = await loadLog(state.currentDate);
+    render();
+  }catch(e){
+    console.warn('초기 로딩 실패:', e);
+    document.getElementById('app').innerHTML =
+      '<div class="summary"><p>서버에 연결하지 못했습니다. 인터넷 연결을 확인해주세요.</p>' +
+      '<button class="btn primary" onclick="location.reload()">다시 시도</button></div>';
+  }
   document.addEventListener('mouseup', ()=>{ if(boardDrag) finishBoardDrag(); });
 })();
 </script>
