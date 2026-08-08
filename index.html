@@ -1,0 +1,1298 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>스크린골프 일지 정산</title>
+<style>
+  :root{
+    --cash:#8bc34a;      /* 현금 - 초록 형광펜 */
+    --cash-bg:#e8f5d9;
+    --card:#f06292;      /* 카드 - 분홍 형광펜 */
+    --card-bg:#fde3ec;
+    --transfer:#ffca28;  /* 이체 - 노랑 형광펜 */
+    --transfer-bg:#fff6da;
+    --ink:#222;
+    --line:#d8d8d8;
+    --bar:#6b6b6b;
+    --bg:#f4f4f2;
+    --card-white:#fff;
+    --danger:#e0453d;
+    --accent:#2f6fed;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    font-family:"Malgun Gothic","Apple SD Gothic Neo",sans-serif;
+    background:var(--bg);
+    color:var(--ink);
+    padding:16px;
+  }
+  h1{font-size:20px;margin:0 0 12px;}
+  .topbar{
+    display:flex;flex-wrap:wrap;gap:10px;align-items:center;
+    background:var(--card-white);border:1px solid var(--line);border-radius:10px;
+    padding:12px 14px;margin-bottom:14px;
+  }
+  .topbar label{font-size:13px;color:#555;margin-right:4px;}
+  .topbar input[type=date], .topbar input[type=text]{
+    padding:6px 8px;border:1px solid var(--line);border-radius:6px;font-size:14px;
+  }
+  .weekday{font-weight:bold;padding:4px 10px;background:#eef2ff;border-radius:6px;color:var(--accent);}
+  .spacer{flex:1;}
+  .btn{
+    padding:7px 14px;border-radius:7px;border:1px solid var(--line);
+    background:#fff;cursor:pointer;font-size:13px;
+  }
+  .btn:hover{background:#f0f0f0;}
+  .btn.primary{background:var(--accent);color:#fff;border-color:var(--accent);}
+  .btn.primary:hover{background:#255bcc;}
+  .btn.danger{color:var(--danger);border-color:var(--danger);background:#fff;}
+  .btn.danger:hover{background:#fdeceb;}
+  .btn.small{padding:3px 8px;font-size:12px;}
+  .autosave-badge{font-size:12px;color:#888;}
+
+  .tabs{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:10px;}
+  .tab{
+    padding:8px 16px;background:var(--bar);color:#fff;border-radius:6px 6px 0 0;
+    cursor:pointer;font-size:13px;font-weight:bold;opacity:0.7;
+  }
+  .tab.active{opacity:1;background:#333;}
+
+  .room-panel{background:var(--card-white);border:1px solid var(--line);border-radius:0 8px 8px 8px;padding:14px;margin-bottom:18px;}
+  .room-summary{font-size:13px;color:#555;margin-bottom:10px;display:flex;gap:14px;flex-wrap:wrap;}
+  .room-summary b{color:#222;}
+
+  .visit-card{
+    border:1px solid var(--line);border-radius:8px;padding:12px;margin-bottom:10px;background:#fafafa;
+  }
+  .visit-head{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px;}
+  .visit-head input[type=text]{padding:5px 8px;border:1px solid var(--line);border-radius:6px;font-size:13px;}
+  .visit-head input.customer{width:140px;}
+  .visit-head input.phone{width:130px;}
+
+  .payments{display:flex;flex-direction:column;gap:6px;margin:8px 0;}
+  .pay-row{display:flex;gap:6px;align-items:center;flex-wrap:wrap;}
+  .pay-row select, .pay-row input{padding:5px 6px;border:1px solid var(--line);border-radius:6px;font-size:12px;}
+  .pay-row input.amount{width:100px;text-align:right;}
+  .pay-row input.memo{width:165px;}
+  .method-btns{display:flex;gap:3px;}
+  .method-btn{
+    padding:5px 9px;border-radius:6px;border:1px solid var(--line);cursor:pointer;font-size:11px;background:#fff;
+  }
+  .method-btn.cash.active{background:var(--cash-bg);border-color:var(--cash);font-weight:bold;}
+  .method-btn.card.active{background:var(--card-bg);border-color:var(--card);font-weight:bold;}
+  .method-btn.transfer.active{background:var(--transfer-bg);border-color:var(--transfer);font-weight:bold;}
+
+  .birdie-row{display:flex;gap:8px;align-items:center;font-size:12px;margin-top:4px;color:#555;}
+  .birdie-row input{width:50px;padding:4px 6px;border:1px solid var(--line);border-radius:6px;}
+
+  .visit-foot{display:flex;justify-content:space-between;align-items:center;margin-top:6px;}
+  .visit-summary-bar{display:flex;align-items:center;gap:8px;cursor:pointer;padding:4px 2px;border-radius:6px;margin-bottom:4px;}
+  .visit-summary-bar:hover{background:#f0f0f0;}
+  .collapse-arrow{color:#888;font-size:11px;width:12px;}
+  .visit-summary-meta{color:#888;font-size:12px;}
+
+  .add-visit-btn{width:100%;padding:10px;border:2px dashed var(--line);background:transparent;border-radius:8px;cursor:pointer;color:#666;font-size:13px;}
+  .add-visit-btn:hover{background:#f0f0f0;}
+
+  .practice-section{background:var(--card-white);border:1px solid var(--line);border-radius:8px;padding:14px;margin-bottom:18px;}
+  .practice-row{display:flex;gap:8px;align-items:center;margin-bottom:6px;flex-wrap:wrap;}
+  .practice-row input.amount{width:100px;padding:5px 6px;border:1px solid var(--line);border-radius:6px;text-align:right;}
+  .warn{color:#c9750c;font-size:11px;}
+
+  .summary{background:var(--card-white);border:1px solid var(--line);border-radius:8px;padding:16px;}
+  .summary h2{font-size:16px;margin:0 0 10px;}
+  table{border-collapse:collapse;width:100%;font-size:13px;}
+  table th, table td{border:1px solid var(--line);padding:6px 8px;text-align:right;}
+  table th{background:#f0f0f0;}
+  table td.label, table th.label{text-align:left;}
+  .grand-row td{font-weight:bold;background:#f7f9ff;}
+  .method-tag{padding:2px 6px;border-radius:5px;font-size:11px;}
+  .method-tag.cash{background:var(--cash-bg);color:#3d6b1a;}
+  .method-tag.card{background:var(--card-bg);color:#a02050;}
+  .method-tag.transfer{background:var(--transfer-bg);color:#8a6300;}
+
+  .view-toggle{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:14px;}
+  .login-box{flex-direction:column;align-items:stretch;gap:12px;max-width:360px;margin:60px auto;}
+  .login-box label{display:block;margin-bottom:4px;font-size:13px;color:#555;}
+  .login-box input{width:100%;padding:8px;border:1px solid var(--line);border-radius:6px;font-size:14px;}
+  .staff-row{display:flex;gap:8px;align-items:center;margin-bottom:6px;}
+  .locked-area{opacity:0.55;pointer-events:none;}
+  .lock-banner{background:#fff3cd;border:1px solid #ffe58a;color:#7a5b00;padding:8px 12px;border-radius:8px;margin-bottom:12px;font-size:13px;}
+  .lock-banner.admin-mode{background:#e6f4ff;border-color:#a9d4ff;color:#0b4a8f;}
+  .folder-status{font-size:12px;color:#888;}
+
+  .board-wrap{overflow-x:auto;background:var(--card-white);border:1px solid var(--line);border-radius:8px;padding:12px;margin-bottom:14px;}
+  .board-table{border-collapse:collapse;font-size:11px;}
+  .board-table th, .board-table td{border:1px solid var(--line);padding:0;text-align:center;white-space:nowrap;}
+  .board-table th{background:#f0f0f0;padding:4px 3px;font-size:10px;font-weight:normal;color:#666;}
+  .board-room-col{position:sticky;left:0;background:#f0f0f0;z-index:2;padding:4px 10px !important;text-align:left;font-weight:bold;font-size:12px;}
+  .board-cell{width:32px;height:38px;cursor:pointer;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:0 3px;}
+  .board-cell.free{background:#fff;}
+  .board-cell.free:hover{background:#eef7e3;}
+  .board-cell.occupied{color:#7a2050;font-weight:bold;}
+  .board-cell.occupied:hover{filter:brightness(0.93);}
+  .board-legend{font-size:11px;color:#888;margin-top:8px;}
+  .board-cell-demo{display:inline-block;width:12px;height:12px;border:1px solid var(--line);vertical-align:middle;margin:0 4px 0 10px;}
+  .board-cell-demo:first-child{margin-left:0;}
+  .board-cell-demo.free{background:#fff;}
+  .board-cell-demo.occupied{background:var(--card-bg);}
+
+  .modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;z-index:1000;}
+  .modal-box{background:#fff;border-radius:10px;padding:20px;width:300px;display:flex;flex-direction:column;gap:6px;}
+  .modal-box label{font-size:13px;color:#555;margin-top:8px;}
+  .modal-box input, .modal-box select{padding:7px 8px;border:1px solid var(--line);border-radius:6px;font-size:14px;}
+  .list-table-wrap{background:var(--card-white);border:1px solid var(--line);border-radius:8px;padding:14px;margin-bottom:14px;overflow-x:auto;}
+  select.month-select{padding:6px 8px;border:1px solid var(--line);border-radius:6px;}
+  .row-actions{display:flex;gap:4px;}
+  footer{text-align:center;color:#999;font-size:11px;margin-top:20px;}
+</style>
+</head>
+<body>
+<h1>🏌️ 스크린골프 일지 정산</h1>
+<div id="app"></div>
+<footer>모든 데이터는 이 컴퓨터의 브라우저(localStorage)에 자동 저장됩니다.</footer>
+
+<script>
+const ROOMS = ['R1','R2','R3','R5','R6','R7','R8','R9'];
+const ROOM_LABEL = { R9: 'R9 (지하1층)' };
+// Per-room tint for the 상황판(board): a stronger shade for the room-name
+// cell, a light version to tint that row's empty slots so a row stays easy
+// to trace across many time columns.
+const ROOM_COLORS = {
+  R1: { label:'#f6c9c9', row:'#fdeeee' },
+  R2: { label:'#f7dcbb', row:'#fdf2e2' },
+  R3: { label:'#f0ecb0', row:'#faf8de' },
+  R5: { label:'#c0e6ae', row:'#e9f7e1' },
+  R6: { label:'#b3e4dc', row:'#e2f6f3' },
+  R7: { label:'#b7d2f2', row:'#e5eefc' },
+  R8: { label:'#cdc0ef', row:'#eee8fb' },
+  R9: { label:'#f0bfdd', row:'#fbe7f3' },
+};
+const WEEKDAYS = ['일','월','화','수','목','금','토'];
+const STORAGE_PREFIX = 'sgledger_';
+const METHODS = [
+  {key:'cash', label:'현금'},
+  {key:'card', label:'카드'},
+  {key:'transfer', label:'이체'},
+];
+const PAY_TYPES = [
+  {key:'GAME', label:'게임비'},
+  {key:'HOLE', label:'홀인원응모(S)'},
+  {key:'ETC', label:'기타(음식/음료 등)'},
+];
+// 상황판: 09:00~24:00을 30분 단위 칸으로 표시
+const BOARD_SLOTS = (()=>{
+  const slots = [];
+  for(let h=9; h<24; h++){
+    slots.push(`${String(h).padStart(2,'0')}:00`);
+    slots.push(`${String(h).padStart(2,'0')}:30`);
+  }
+  return slots;
+})();
+function slotEnd(slot){
+  const [h,m] = slot.split(':').map(Number);
+  let nh=h, nm=m+30;
+  if(nm>=60){ nh+=1; nm=0; }
+  return `${String(nh).padStart(2,'0')}:${String(nm).padStart(2,'0')}`;
+}
+function endTimeOptions(start){
+  const opts = [];
+  let cur = slotEnd(start);
+  while(true){
+    opts.push(cur);
+    if(cur === '24:00') break;
+    cur = slotEnd(cur);
+  }
+  return opts;
+}
+function toMinutes(t){ const [h,m] = t.split(':').map(Number); return h*60+m; }
+const ADMIN_HASH_KEY = STORAGE_PREFIX + 'admin_hash';
+const SESSION_KEY = STORAGE_PREFIX + 'session';
+const STAFF_KEY = STORAGE_PREFIX + 'staff';
+const AUDIT_KEY = STORAGE_PREFIX + 'audit';
+const DEFAULT_ADMIN_PASSWORD = 'daesung1!';
+const AUDIT_TYPE_LABEL = {
+  STAFF_CHANGE: '담당자 변경(교대 인수인계)',
+  CROSS_EDIT: '다른 직원이 작성한 내용 수정',
+  CLOSE: '마감 처리',
+  ADMIN_EDIT_ON_CLOSED: '마감 후 수정/삭제(관리자)',
+  REOPEN: '마감 취소(관리자)',
+  PASSWORD_CHANGE: '관리자 비밀번호 변경',
+  STAFF_ADDED: '직원 계정 추가',
+  STAFF_PW_RESET: '직원 비밀번호 재설정',
+  STAFF_REMOVED: '직원 계정 삭제',
+};
+
+let session = null; // { role:'admin', name:'admin' } or { role:'staff', name:'홍길동' }
+function isAdmin(){ return !!(session && session.role === 'admin'); }
+let dataDirHandle = null; // File System Access API handle to the "data" folder, if connected
+
+function uid(){ return 'id' + Date.now().toString(36) + Math.random().toString(36).slice(2,8); }
+function todayStr(){
+  const d = new Date();
+  const pad = n => String(n).padStart(2,'0');
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+}
+function weekdayLabel(dateStr){
+  const d = new Date(dateStr + 'T00:00:00');
+  return WEEKDAYS[d.getDay()];
+}
+function fmt(n){ return (Number(n)||0).toLocaleString('ko-KR'); }
+
+function KEY(date){ return STORAGE_PREFIX + date; }
+function blankLog(date){
+  return {
+    date, staff:'',
+    rooms: Object.fromEntries(ROOMS.map(r=>[r,[]])),
+    practice: [],
+  };
+}
+function loadLog(date){
+  const raw = localStorage.getItem(KEY(date));
+  if(!raw) return blankLog(date);
+  try{
+    const parsed = JSON.parse(raw);
+    ROOMS.forEach(r=>{
+      if(!parsed.rooms[r]) parsed.rooms[r]=[];
+      // Visits saved before "작성자 기록" existed have no createdBy — best-guess
+      // it as whoever this date's 담당자 was at the time, so cross-staff edits
+      // on old data can still be detected instead of silently going unlogged.
+      parsed.rooms[r].forEach(v=>{ if(!v.createdBy) v.createdBy = parsed.staff || ''; });
+    });
+    if(!parsed.practice) parsed.practice=[];
+    return parsed;
+  }catch(e){ return blankLog(date); }
+}
+function saveLog(log){
+  localStorage.setItem(KEY(log.date), JSON.stringify(log));
+  writeLogToFolder(log); // best-effort mirror to a real file, if a data folder is connected
+}
+function deleteLogDate(date){
+  localStorage.removeItem(KEY(date));
+}
+function listAllDates(){
+  return Object.keys(localStorage)
+    .filter(k=>k.startsWith(STORAGE_PREFIX))
+    .map(k=>k.slice(STORAGE_PREFIX.length))
+    .filter(d=>/^\d{4}-\d{2}-\d{2}$/.test(d))
+    .sort();
+}
+
+// ---------- admin auth ----------
+async function sha256(text){
+  const enc = new TextEncoder().encode(text);
+  const buf = await crypto.subtle.digest('SHA-256', enc);
+  return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
+}
+async function ensureAdminHash(){
+  if(!localStorage.getItem(ADMIN_HASH_KEY)){
+    localStorage.setItem(ADMIN_HASH_KEY, await sha256(DEFAULT_ADMIN_PASSWORD));
+  }
+}
+async function attemptLogin(id, pw){
+  id = (id||'').trim();
+  if(!id || !pw){ alert('아이디와 비밀번호를 입력하세요.'); return; }
+  if(id === 'admin'){
+    const hash = await sha256(pw);
+    if(hash === localStorage.getItem(ADMIN_HASH_KEY)){
+      session = { role:'admin', name:'admin' };
+      sessionStorage.setItem(SESSION_KEY, JSON.stringify(session));
+      state.view = 'edit';
+      render();
+    } else {
+      alert('관리자 비밀번호가 올바르지 않습니다.');
+    }
+    return;
+  }
+  const staffAcct = getStaffList().find(s=>s.name===id);
+  if(!staffAcct){
+    alert('등록되지 않은 이름입니다. 관리자에게 계정 등록을 요청하세요.');
+    return;
+  }
+  const hash = await sha256(pw);
+  if(hash !== staffAcct.passwordHash){
+    alert('비밀번호가 올바르지 않습니다.');
+    return;
+  }
+  session = { role:'staff', name: staffAcct.name };
+  sessionStorage.setItem(SESSION_KEY, JSON.stringify(session));
+  state.view = 'edit';
+  render();
+}
+function logout(){
+  session = null;
+  sessionStorage.removeItem(SESSION_KEY);
+  state.view = 'edit';
+  render();
+}
+function changeAdminPassword(){
+  const oldPw = prompt('현재 비밀번호를 입력하세요');
+  if(oldPw===null) return;
+  sha256(oldPw).then(hash=>{
+    if(hash !== localStorage.getItem(ADMIN_HASH_KEY)){ alert('현재 비밀번호가 올바르지 않습니다.'); return; }
+    const newPw = prompt('새 비밀번호를 입력하세요');
+    if(newPw===null || newPw.trim()==='') return;
+    const confirmPw = prompt('새 비밀번호를 한 번 더 입력하세요');
+    if(confirmPw !== newPw){ alert('입력한 두 비밀번호가 서로 다릅니다. 다시 시도해주세요.'); return; }
+    sha256(newPw).then(newHash=>{
+      localStorage.setItem(ADMIN_HASH_KEY, newHash);
+      addAudit(state.currentDate, 'PASSWORD_CHANGE', '관리자 비밀번호가 변경됨');
+      alert('비밀번호가 변경되었습니다.');
+      render();
+    });
+  });
+}
+
+// ---------- staff accounts (admin-managed) ----------
+function getStaffList(){
+  try{ return JSON.parse(localStorage.getItem(STAFF_KEY) || '[]'); }catch(e){ return []; }
+}
+function saveStaffList(list){
+  localStorage.setItem(STAFF_KEY, JSON.stringify(list));
+}
+async function addStaffAccount(){
+  const name = prompt('추가할 직원 이름을 입력하세요');
+  if(name===null || name.trim()==='') return;
+  const trimmed = name.trim();
+  if(trimmed === 'admin' || getStaffList().some(s=>s.name===trimmed)){
+    alert('이미 사용 중인 이름입니다.');
+    return;
+  }
+  const pw = prompt(`"${trimmed}"님의 초기 비밀번호를 입력하세요`);
+  if(pw===null || pw.trim()==='') return;
+  const list = getStaffList();
+  list.push({ id: uid(), name: trimmed, passwordHash: await sha256(pw) });
+  saveStaffList(list);
+  addAudit('-', 'STAFF_ADDED', `직원 "${trimmed}" 추가됨`);
+  render();
+}
+async function resetStaffPassword(id){
+  const list = getStaffList();
+  const s = list.find(x=>x.id===id);
+  if(!s) return;
+  const pw = prompt(`"${s.name}"님의 새 비밀번호를 입력하세요`);
+  if(pw===null || pw.trim()==='') return;
+  s.passwordHash = await sha256(pw);
+  saveStaffList(list);
+  addAudit('-', 'STAFF_PW_RESET', `직원 "${s.name}" 비밀번호 재설정됨`);
+  alert('비밀번호가 변경되었습니다.');
+  render();
+}
+function removeStaffAccount(id){
+  const list = getStaffList();
+  const s = list.find(x=>x.id===id);
+  if(!s) return;
+  if(!confirm(`직원 "${s.name}" 계정을 삭제할까요? 이 직원은 더 이상 로그인할 수 없습니다.`)) return;
+  saveStaffList(list.filter(x=>x.id!==id));
+  addAudit('-', 'STAFF_REMOVED', `직원 "${s.name}" 삭제됨`);
+  render();
+}
+
+// ---------- audit log ----------
+function getAudit(){
+  try{ return JSON.parse(localStorage.getItem(AUDIT_KEY) || '[]'); }catch(e){ return []; }
+}
+function addAudit(date, type, detail){
+  const list = getAudit();
+  list.push({ ts: new Date().toISOString(), date, type, detail });
+  localStorage.setItem(AUDIT_KEY, JSON.stringify(list));
+}
+function commitStaffAudit(newVal, prevVal){
+  if(prevVal !== undefined && prevVal.trim() !== '' && prevVal !== newVal){
+    addAudit(state.log.date, 'STAFF_CHANGE', `${prevVal} → ${newVal}`);
+  }
+}
+// Flags edits to a visit made by someone other than whoever originally
+// created it (v.createdBy), so a later admin review can see that content
+// another employee entered was touched by someone else.
+function noteCrossStaffEdit(room, v, actionDesc){
+  if(!session || !v || !v.createdBy || v.createdBy === session.name) return;
+  addAudit(state.log.date, 'CROSS_EDIT', `${session.name}님이 ${v.createdBy}님이 작성한 ${ROOM_LABEL[room]||room} 예약("${v.customer||'이름없음'}")의 ${actionDesc}`);
+}
+
+// ---------- day close / lock ----------
+function isLocked(){
+  return !!(state.log && state.log.closed) && !isAdmin();
+}
+// Blocks the edit if locked (alerts + reverts UI). Also logs an audit trail
+// entry when an admin edits an already-closed day, so a later admin review
+// can see that a closed day's figures were touched after close.
+function guardEdit(){
+  if(state.log.closed && !isAdmin()){
+    alert('마감된 일지입니다. 관리자만 수정할 수 있습니다.');
+    render();
+    return false;
+  }
+  if(state.log.closed && isAdmin()){
+    addAudit(state.log.date, 'ADMIN_EDIT_ON_CLOSED', '관리자가 마감된 일지를 수정함');
+  }
+  return true;
+}
+// Lighter guard for quiet (per-keystroke) text fields: blocks but doesn't
+// spam the audit log on every keystroke.
+function isBlockedForEdit(){
+  if(state.log.closed && !isAdmin()){
+    alert('마감된 일지입니다. 관리자만 수정할 수 있습니다.');
+    render();
+    return true;
+  }
+  return false;
+}
+function closeDay(){
+  if(state.log.closed) return;
+  const closer = session ? session.name : ((state.log.staff||'').trim() || '(담당자 미기재)');
+  if(!confirm(`${state.log.date} 일지를 마감할까요?\n마감 후에는 관리자만 수정할 수 있습니다.`)) return;
+  state.log.closed = true;
+  state.log.closedAt = new Date().toISOString();
+  state.log.closedBy = closer;
+  addAudit(state.log.date, 'CLOSE', `${closer}님이 마감 처리함`);
+  persistAndRender();
+}
+function reopenDay(){
+  if(!isAdmin() || !state.log.closed) return;
+  if(!confirm(`${state.log.date} 일지의 마감을 취소하고 다시 직원이 수정할 수 있게 할까요?`)) return;
+  const prevCloser = state.log.closedBy || '-';
+  state.log.closed = false;
+  delete state.log.closedAt;
+  delete state.log.closedBy;
+  addAudit(state.log.date, 'REOPEN', `관리자(${session.name})가 마감을 취소함 (기존 마감자: ${prevCloser})`);
+  persistAndRender();
+}
+
+// ---------- optional: mirror saves to a real "data" folder ----------
+function idbOpen(){
+  return new Promise((resolve, reject)=>{
+    const req = indexedDB.open('sgledger-fs', 1);
+    req.onupgradeneeded = ()=>{ req.result.createObjectStore('handles'); };
+    req.onsuccess = ()=>resolve(req.result);
+    req.onerror = ()=>reject(req.error);
+  });
+}
+async function idbSaveHandle(handle){
+  const db = await idbOpen();
+  return new Promise((resolve, reject)=>{
+    const tx = db.transaction('handles','readwrite');
+    tx.objectStore('handles').put(handle, 'dataDir');
+    tx.oncomplete = ()=>resolve();
+    tx.onerror = ()=>reject(tx.error);
+  });
+}
+async function idbLoadHandle(){
+  try{
+    const db = await idbOpen();
+    return new Promise(resolve=>{
+      const tx = db.transaction('handles','readonly');
+      const req = tx.objectStore('handles').get('dataDir');
+      req.onsuccess = ()=>resolve(req.result || null);
+      req.onerror = ()=>resolve(null);
+    });
+  }catch(e){ return null; }
+}
+async function initDataFolder(){
+  try{
+    if(!window.showDirectoryPicker) return;
+    const saved = await idbLoadHandle();
+    if(saved && (await saved.queryPermission({mode:'readwrite'})) === 'granted'){
+      dataDirHandle = saved;
+    }
+  }catch(e){ /* File System Access API unavailable in this context (e.g. some file:// setups) */ }
+}
+async function connectDataFolder(){
+  if(!isAdmin()){
+    alert('데이터 폴더 연결은 관리자만 할 수 있습니다.');
+    return;
+  }
+  if(!window.showDirectoryPicker){
+    alert('이 브라우저는 폴더 자동 저장을 지원하지 않습니다 (Chrome 또는 Edge 최신 버전 필요).\n대신 "백업(JSON)" 버튼으로 수동 저장해주세요. 데이터는 계속 이 브라우저에 자동 저장됩니다.');
+    return;
+  }
+  try{
+    const handle = await window.showDirectoryPicker({ id:'sgledger-data', mode:'readwrite' });
+    dataDirHandle = handle;
+    try{ await idbSaveHandle(handle); }catch(e){}
+    alert(`"${handle.name}" 폴더에 연결되었습니다. 앞으로 저장할 때마다 이 폴더 아래 월별 폴더(예: 2026-08)에 파일이 자동으로 기록됩니다.\nindex.html 옆에 만든 "data" 폴더를 선택하는 것을 권장합니다.`);
+    render();
+  }catch(err){
+    if(err && err.name === 'AbortError') return;
+    alert('폴더 연결에 실패했습니다: ' + (err && err.message ? err.message : err));
+  }
+}
+async function writeLogToFolder(log){
+  if(!dataDirHandle) return;
+  try{
+    const month = log.date.slice(0,7);
+    const monthDir = await dataDirHandle.getDirectoryHandle(month, { create:true });
+    const fileHandle = await monthDir.getFileHandle(`${log.date}.json`, { create:true });
+    const writable = await fileHandle.createWritable();
+    await writable.write(JSON.stringify(log, null, 2));
+    await writable.close();
+  }catch(err){
+    console.warn('데이터 폴더 파일 저장 실패:', err);
+  }
+}
+
+let state = {
+  view: 'edit', // 'edit' | 'list'
+  currentDate: todayStr(),
+  log: null,
+  activeRoom: 'R1',
+  listMonth: null,
+};
+state.log = loadLog(state.currentDate);
+let collapsedVisits = new Set(); // UI-only: which visit cards are folded (not persisted)
+let bookingDialog = null; // { room, start } while the board's "new booking" modal is open
+
+let lastSavedAt = null;
+// Updates the small "last saved" badge directly via the DOM instead of a
+// full render() — a full render mid-interval could land while the user is
+// composing Korean text and would break IME input.
+function markSaved(){
+  lastSavedAt = new Date();
+  const badge = document.getElementById('lastSavedBadge');
+  if(badge) badge.textContent = '✔ 마지막 저장 ' + lastSavedAt.toLocaleTimeString('ko-KR');
+}
+// Whoever is logged in as staff and actually edits a day's log becomes its
+// recorded 담당자 — this replaces manually typing a name, and doubles as
+// the handover record between shifts (logged via commitStaffAudit so an
+// admin can later see when responsibility for a date changed hands).
+function syncStaffOwnership(){
+  if(session && session.role==='staff' && state.log.staff !== session.name){
+    commitStaffAudit(session.name, state.log.staff);
+    state.log.staff = session.name;
+  }
+}
+function persistAndRender(){
+  syncStaffOwnership();
+  saveLog(state.log);
+  markSaved();
+  render();
+}
+// Quiet save: used for free-text fields (Korean/IME input) where a full
+// re-render per keystroke would destroy the input node and break IME
+// composition. These fields don't affect any computed totals, so it's
+// safe to persist without redrawing the DOM.
+function persistQuiet(){
+  syncStaffOwnership();
+  saveLog(state.log);
+  markSaved();
+}
+// Safety-net autosave: re-persists the current log every minute even if no
+// change event fired, and refreshes the "last saved" badge without a full
+// render (see markSaved).
+setInterval(()=>{
+  if(state.log) saveLog(state.log);
+  markSaved();
+}, 60000);
+
+// ---------- mutation helpers ----------
+// (all mutations respect isLocked()/guardEdit() — see "day close / lock" section above)
+function changeDate(v){
+  state.currentDate = v;
+  state.log = loadLog(v);
+  render();
+}
+function addVisit(room){
+  if(!guardEdit()) return;
+  state.log.rooms[room].push({ id:uid(), customer:'', phone:'', payments:[], birdieCount:0, createdBy: session?session.name:'' });
+  persistAndRender();
+}
+function removeVisit(room, visitId){
+  if(!guardEdit()) return;
+  if(!confirm('이 방문 기록을 삭제할까요?')) return;
+  const v = getVisit(room, visitId);
+  noteCrossStaffEdit(room, v, '방문 전체 삭제');
+  state.log.rooms[room] = state.log.rooms[room].filter(v=>v.id!==visitId);
+  persistAndRender();
+}
+function getVisit(room, visitId){
+  return state.log.rooms[room].find(v=>v.id===visitId);
+}
+
+// ---------- board (occupancy grid) ----------
+function openBookingDialog(room, start){
+  // Uses isLocked() (not guardEdit()) deliberately: opening the dialog isn't
+  // itself a data change, so it shouldn't write an audit entry. guardEdit()
+  // runs (and logs, if applicable) once the booking is actually submitted.
+  if(isLocked()){
+    alert('마감된 일지입니다. 관리자만 예약을 추가할 수 있습니다.');
+    return;
+  }
+  bookingDialog = { room, start };
+  render();
+}
+function closeBookingDialog(){
+  bookingDialog = null;
+  render();
+}
+function submitBooking(){
+  if(!bookingDialog) return;
+  const { room, start } = bookingDialog;
+  if(!guardEdit()){ bookingDialog = null; return; }
+  const nameEl = document.getElementById('bookingCustomer');
+  const phoneEl = document.getElementById('bookingPhone');
+  const endEl = document.getElementById('bookingEnd');
+  const name = nameEl.value.trim();
+  const phone = phoneEl.value.trim();
+  const end = endEl.value;
+  if(!name){ alert('예약자 이름을 입력하세요.'); return; }
+  const visits = state.log.rooms[room];
+  const conflict = visits.some(v=>v.bookingStart && v.bookingEnd && start < v.bookingEnd && end > v.bookingStart);
+  if(conflict){ alert('선택한 시간대에 이미 다른 예약이 있습니다. 시간을 다시 선택해주세요.'); return; }
+  visits.push({ id:uid(), customer:name, phone, payments:[], birdieCount:0, bookingStart:start, bookingEnd:end, createdBy: session?session.name:'' });
+  bookingDialog = null;
+  persistAndRender();
+}
+// Edits an existing visit's booking range directly from the room panel (not
+// just via the board's create dialog), keeping both views in sync. Rejects
+// the change with an alert if it would overlap another visit's occupied time.
+function setBookingRange(room, visitId, field, value){
+  if(!guardEdit()) return;
+  const v = getVisit(room, visitId);
+  if(field==='start' && value===''){
+    const oldRange = v.bookingStart ? `${v.bookingStart}~${v.bookingEnd}` : '미지정';
+    delete v.bookingStart;
+    delete v.bookingEnd;
+    noteCrossStaffEdit(room, v, `예약 시간 해제 (${oldRange} → 미지정)`);
+    persistAndRender();
+    return;
+  }
+  let newStart = field==='start' ? value : v.bookingStart;
+  let newEnd = field==='end' ? value : v.bookingEnd;
+  if(!newEnd || newEnd <= newStart) newEnd = slotEnd(newStart);
+  const conflict = state.log.rooms[room].some(other =>
+    other.id!==visitId && other.bookingStart && other.bookingEnd &&
+    newStart < other.bookingEnd && newEnd > other.bookingStart
+  );
+  if(conflict){
+    alert('이미 다른 손님이 점유하고 있는 시간입니다. 다른 시간을 선택해주세요.');
+    render(); // revert the <select> back to the real (unchanged) value
+    return;
+  }
+  const oldRange = v.bookingStart ? `${v.bookingStart}~${v.bookingEnd}` : '미지정';
+  v.bookingStart = newStart;
+  v.bookingEnd = newEnd;
+  noteCrossStaffEdit(room, v, `예약 시간 변경 (${oldRange} → ${newStart}~${newEnd})`);
+  persistAndRender();
+}
+function cancelBookingFromBoard(room, visitId){
+  if(!guardEdit()) return;
+  const v = getVisit(room, visitId);
+  if(!v) return;
+  if(v.payments && v.payments.length > 0){
+    alert(`"${v.customer||'이름없음'}"님 예약에는 이미 결제 내역(${v.payments.length}건)이 입력되어 있어 상황판에서 바로 삭제할 수 없습니다.\n삭제하려면 "${ROOM_LABEL[room]||room}" 탭에서 방문 카드를 열어 결제 내역을 확인한 뒤 "방문 삭제"를 이용해주세요.`);
+    return;
+  }
+  if(!confirm(`"${v.customer||'이름없음'}"님의 예약(${v.bookingStart}~${v.bookingEnd})을 취소(삭제)할까요?`)) return;
+  noteCrossStaffEdit(room, v, '상황판에서 예약 취소(삭제)');
+  state.log.rooms[room] = state.log.rooms[room].filter(x=>x.id!==visitId);
+  persistAndRender();
+}
+function setCustomer(room, visitId, v){
+  if(isBlockedForEdit()) return;
+  getVisit(room, visitId).customer = v; persistQuiet();
+}
+function setPhone(room, visitId, v){
+  if(isBlockedForEdit()) return;
+  getVisit(room, visitId).phone = v; persistQuiet();
+}
+function addPayment(room, visitId){
+  if(!guardEdit()) return;
+  const v = getVisit(room, visitId);
+  v.payments.push({ id:uid(), type:'GAME', method:'cash', amount:0, memo:'' });
+  noteCrossStaffEdit(room, v, '결제 항목 추가');
+  persistAndRender();
+}
+const FIELD_LABEL = { amount:'금액', method:'결제수단', type:'항목 종류' };
+function updatePayment(room, visitId, payId, field, value){
+  if(!guardEdit()) return;
+  const v = getVisit(room, visitId);
+  const p = v.payments.find(p=>p.id===payId);
+  const newVal = field==='amount' ? (Number(value)||0) : value;
+  const hadValue = (Number(p.amount)||0) !== 0; // this payment line already holds a recorded amount
+  const changed = p[field] !== newVal;
+  if(hadValue && changed){
+    if(!confirm(`이미 입력된 ${FIELD_LABEL[field]}을(를) 수정하시겠습니까?`)){
+      render(); // reset any premature UI change (e.g. a <select>) back to the real state
+      return;
+    }
+  }
+  const oldVal = p[field];
+  p[field] = newVal;
+  if(changed) noteCrossStaffEdit(room, v, `결제 ${FIELD_LABEL[field]} 수정 (${oldVal===''||oldVal==null?'-':oldVal} → ${newVal})`);
+  persistAndRender();
+}
+function updatePaymentQuiet(room, visitId, payId, field, value){
+  if(isBlockedForEdit()) return;
+  const p = getVisit(room, visitId).payments.find(p=>p.id===payId);
+  p[field] = value;
+  persistQuiet();
+}
+function removePayment(room, visitId, payId){
+  if(!guardEdit()) return;
+  if(!confirm('이 결제 내역을 삭제할까요?')) return;
+  const v = getVisit(room, visitId);
+  v.payments = v.payments.filter(p=>p.id!==payId);
+  noteCrossStaffEdit(room, v, '결제 내역 삭제');
+  persistAndRender();
+}
+function setBirdie(room, visitId, v){
+  if(!guardEdit()) return;
+  const visit = getVisit(room, visitId);
+  const newVal = Number(v)||0;
+  const oldVal = visit.birdieCount||0;
+  if(oldVal !== 0 && oldVal !== newVal){
+    if(!confirm(`이미 입력된 버디 횟수를 ${newVal}회로 수정하시겠습니까?`)){
+      render();
+      return;
+    }
+  }
+  visit.birdieCount = newVal;
+  if(oldVal !== newVal) noteCrossStaffEdit(room, visit, `버디 횟수 변경 (${oldVal}회 → ${newVal}회)`);
+  persistAndRender();
+}
+function addPractice(){
+  if(!guardEdit()) return;
+  state.log.practice.push({ id:uid(), amount:0, method:'cash' });
+  persistAndRender();
+}
+function updatePractice(id, field, value){
+  if(!guardEdit()) return;
+  const p = state.log.practice.find(p=>p.id===id);
+  const newVal = field==='amount' ? (Number(value)||0) : value;
+  const hadValue = (Number(p.amount)||0) !== 0;
+  const changed = p[field] !== newVal;
+  if(hadValue && changed){
+    if(!confirm(`이미 입력된 ${FIELD_LABEL[field]}을(를) 수정하시겠습니까?`)){
+      render();
+      return;
+    }
+  }
+  p[field] = newVal;
+  persistAndRender();
+}
+function removePractice(id){
+  if(!guardEdit()) return;
+  if(!confirm('이 연습장 매출 항목을 삭제할까요?')) return;
+  state.log.practice = state.log.practice.filter(p=>p.id!==id);
+  persistAndRender();
+}
+
+// ---------- calculations ----------
+function computeSummary(log){
+  const totals = {cash:0, card:0, transfer:0};
+  const roomTotals = {};
+  let sgTotal = 0;
+  let birdieTotal = 0;
+  let birdieCountSum = 0;
+
+  ROOMS.forEach(r=>{
+    roomTotals[r] = {cash:0, card:0, transfer:0};
+    (log.rooms[r]||[]).forEach(v=>{
+      v.payments.forEach(p=>{
+        if(p.type==='HOLE') sgTotal += Number(p.amount)||0;
+        roomTotals[r][p.method] += Number(p.amount)||0;
+        totals[p.method] += Number(p.amount)||0;
+      });
+      const bc = Number(v.birdieCount)||0;
+      birdieCountSum += bc;
+      birdieTotal += bc*100;
+    });
+  });
+
+  const practiceTotals = {cash:0, card:0, transfer:0};
+  (log.practice||[]).forEach(p=>{
+    practiceTotals[p.method] += Number(p.amount)||0;
+    totals[p.method] += Number(p.amount)||0;
+  });
+
+  const grandTotal = totals.cash + totals.card + totals.transfer;
+  return { totals, roomTotals, sgTotal, birdieTotal, birdieCountSum, practiceTotals, grandTotal };
+}
+
+// ---------- render ----------
+function render(){
+  const app = document.getElementById('app');
+  if(!session){ app.innerHTML = renderLogin(); return; }
+  if(state.view==='admin' && !isAdmin()) state.view = 'edit'; // staff can't reach the admin page
+  if(state.view==='list' && !isAdmin()) state.view = 'edit'; // 조회/통계 is admin-only
+  if(state.view==='edit') app.innerHTML = renderEditView();
+  else if(state.view==='list') app.innerHTML = renderListView();
+  else if(state.view==='admin') app.innerHTML = renderAdminView();
+}
+
+function renderLogin(){
+  return `
+    <div class="topbar login-box">
+      <h2 style="margin:0 0 4px;font-size:18px;">🔐 로그인</h2>
+      <div>
+        <label>아이디</label>
+        <input type="text" id="loginId" placeholder="admin 또는 직원 이름" autocomplete="username"
+          onkeydown="if(event.key==='Enter'){document.getElementById('loginPw').focus()}">
+      </div>
+      <div>
+        <label>비밀번호</label>
+        <input type="password" id="loginPw" placeholder="비밀번호" autocomplete="current-password"
+          onkeydown="if(event.key==='Enter'){submitLogin()}">
+      </div>
+      <button class="btn primary" onclick="submitLogin()">로그인</button>
+      <p style="font-size:12px;color:#888;margin:0;">관리자: 아이디 "admin" + 관리자 비밀번호<br>직원: 관리자가 등록해 준 이름과 비밀번호</p>
+    </div>
+  `;
+}
+function submitLogin(){
+  const id = document.getElementById('loginId').value;
+  const pw = document.getElementById('loginPw').value;
+  attemptLogin(id, pw);
+}
+
+function renderNav(){
+  const log = state.log;
+  return `
+    <div class="view-toggle">
+      <button class="btn ${state.view==='edit'?'primary':''}" onclick="state.view='edit';render()">✏️ 일지 입력</button>
+      ${isAdmin() ? `
+        <button class="btn ${state.view==='list'?'primary':''}" onclick="state.view='list';render()">📊 조회/통계</button>
+        <button class="btn ${state.view==='admin'?'primary':''}" onclick="state.view='admin';render()">🛠 관리자 페이지</button>
+      ` : ''}
+      <div class="spacer"></div>
+      <span class="autosave-badge">👤 ${escHtml(session.name)}${isAdmin()?' (관리자)':''}</span>
+      ${log && log.closed
+        ? `<span class="method-tag transfer">🔒 마감됨</span>${isAdmin() ? `<button class="btn small" onclick="reopenDay()">🔓 마감 취소</button>` : ''}`
+        : `<button class="btn" onclick="closeDay()">🔒 마감 처리</button>`}
+      <button class="btn danger" onclick="logout()">🚪 로그아웃</button>
+    </div>
+  `;
+}
+
+function renderBoard(){
+  const locked = isLocked();
+  return `
+    <div class="board-wrap ${locked?'locked-area':''}">
+      <table class="board-table">
+        <tr><th class="board-room-col">룸</th>${BOARD_SLOTS.map(s=>`<th>${s.endsWith(':00')?s:''}</th>`).join('')}</tr>
+        ${ROOMS.map(room=>{
+          const visits = state.log.rooms[room] || [];
+          const c = ROOM_COLORS[room] || { label:'#f0f0f0', row:'#fff' };
+          return `<tr><td class="board-room-col">${ROOM_LABEL[room]||room}</td>${renderBoardRow(room, visits, c.label)}</tr>`;
+        }).join('')}
+      </table>
+      <div class="board-legend"><span class="board-cell-demo free"></span>예약 가능(클릭 시 예약)<span class="board-cell-demo occupied"></span>예약됨(클릭 시 취소, 예약자 이름 표시)</div>
+    </div>
+    ${renderBookingDialog()}
+  `;
+}
+// Walks the 30-min slots left to right and merges consecutive slots that
+// belong to the same booking into one wide cell (colspan) so the
+// reservation's name is shown once across its full occupied span, not
+// truncated per-slot.
+function renderBoardRow(room, visits, occupiedColor){
+  let html = '';
+  let i = 0;
+  while(i < BOARD_SLOTS.length){
+    const slot = BOARD_SLOTS[i];
+    const owner = visits.find(v=>v.bookingStart && v.bookingEnd && slot >= v.bookingStart && slot < v.bookingEnd);
+    if(owner && slot === owner.bookingStart){
+      const span = Math.max(1, Math.round((toMinutes(owner.bookingEnd) - toMinutes(owner.bookingStart)) / 30));
+      const hasPayments = owner.payments && owner.payments.length > 0;
+      const tip = `${owner.customer||''}${owner.phone?' ☎'+owner.phone:''} (${owner.bookingStart}~${owner.bookingEnd})${hasPayments?' · 결제 있음(상황판 삭제 불가)':''}`;
+      html += `<td class="board-cell occupied" colspan="${span}" style="background:${occupiedColor};" title="${escAttr(tip)}" onclick="cancelBookingFromBoard('${room}','${owner.id}')">${hasPayments?'🔒 ':''}${escHtml(owner.customer||'')}</td>`;
+      i += span;
+    } else if(owner){
+      // Defensive fallback for pre-existing overlapping data; normal use never reaches this.
+      html += `<td class="board-cell occupied" style="background:${occupiedColor};" title="${escAttr(owner.customer||'')}" onclick="cancelBookingFromBoard('${room}','${owner.id}')"></td>`;
+      i += 1;
+    } else {
+      html += `<td class="board-cell free" title="${slot} 예약하기" onclick="openBookingDialog('${room}','${slot}')"></td>`;
+      i += 1;
+    }
+  }
+  return html;
+}
+function renderBookingDialog(){
+  if(!bookingDialog) return '';
+  const { room, start } = bookingDialog;
+  const endOptions = endTimeOptions(start);
+  const defaultEnd = endOptions[Math.min(1, endOptions.length-1)];
+  return `
+    <div class="modal-backdrop" onclick="if(event.target===this)closeBookingDialog()">
+      <div class="modal-box">
+        <h3 style="margin:0 0 4px;font-size:16px;">${ROOM_LABEL[room]||room} 예약 — ${start} 시작</h3>
+        <label>예약자 이름</label>
+        <input type="text" id="bookingCustomer" placeholder="예약자 이름" onkeydown="if(event.key==='Enter'){submitBooking()}">
+        <label>전화번호 (선택)</label>
+        <input type="tel" id="bookingPhone" placeholder="010-0000-0000" onkeydown="if(event.key==='Enter'){submitBooking()}">
+        <label>종료 시간</label>
+        <select id="bookingEnd">
+          ${endOptions.map(o=>`<option value="${o}" ${o===defaultEnd?'selected':''}>${o}</option>`).join('')}
+        </select>
+        <div style="display:flex;gap:8px;margin-top:14px;">
+          <button class="btn primary" onclick="submitBooking()">예약 생성</button>
+          <button class="btn" onclick="closeBookingDialog()">취소</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderEditView(){
+  const log = state.log;
+  const summary = computeSummary(log);
+  const locked = isLocked();
+  return `
+    ${renderNav()}
+    <div class="topbar">
+      <label>날짜</label>
+      <input type="date" value="${log.date}" onchange="changeDate(this.value)">
+      <span class="weekday">${weekdayLabel(log.date)}요일</span>
+      <span class="method-tag" style="background:#eef2ff;color:var(--accent);">담당자: ${escHtml(log.staff || session.name)}</span>
+      <div class="spacer"></div>
+      <span class="autosave-badge" id="lastSavedBadge">${lastSavedAt ? '✔ 마지막 저장 ' + lastSavedAt.toLocaleTimeString('ko-KR') : '자동 저장 대기중'}</span>
+      ${isAdmin() ? `<button class="btn folder-status" onclick="connectDataFolder()">📁 ${dataDirHandle ? '데이터 폴더 연결됨' : '데이터 폴더 연결'}</button>` : ''}
+    </div>
+
+    ${renderBoard()}
+
+    ${log.closed ? `
+      <div class="lock-banner ${isAdmin()?'admin-mode':''}">
+        🔒 이 일지는 <b>${escHtml(log.closedBy||'-')}</b>님이 ${log.closedAt ? new Date(log.closedAt).toLocaleString('ko-KR') : ''}에 마감했습니다.
+        ${isAdmin() ? ' 관리자 모드로 로그인되어 있어 수정할 수 있습니다.' : ' 수정하려면 관리자 로그인이 필요합니다.'}
+      </div>
+    ` : ''}
+
+    <div class="tabs">
+      ${['ALL',...ROOMS].map(r=>`<div class="tab ${state.activeRoom===r?'active':''}" onclick="state.activeRoom='${r}';render()">${r==='ALL'?'전체':(ROOM_LABEL[r]||r)}</div>`).join('')}
+    </div>
+    ${state.activeRoom==='ALL' ? renderAllRoomsTable() : renderRoomPanel(state.activeRoom, summary)}
+    ${renderPracticeSection()}
+    ${renderSummaryTable(summary)}
+  `;
+}
+
+function renderRoomPanel(room, summary){
+  const visits = state.log.rooms[room] || [];
+  const rt = summary.roomTotals[room];
+  const locked = isLocked();
+  return `
+    <div class="room-panel">
+      <div class="room-summary">
+        <span>이 방 소계 —</span>
+        <span><span class="method-tag cash">현금</span> <b>${fmt(rt.cash)}</b>원</span>
+        <span><span class="method-tag card">카드</span> <b>${fmt(rt.card)}</b>원</span>
+        <span><span class="method-tag transfer">이체</span> <b>${fmt(rt.transfer)}</b>원</span>
+        <span>합계 <b>${fmt(rt.cash+rt.card+rt.transfer)}</b>원</span>
+      </div>
+      <div class="${locked?'locked-area':''}">
+        ${visits.map(v=>renderVisitCard(room, v)).join('')}
+        <button class="add-visit-btn" ${locked?'disabled':''} onclick="addVisit('${room}')">+ 방문(예약) 추가</button>
+      </div>
+    </div>
+  `;
+}
+
+function toggleVisitCollapse(visitId){
+  if(collapsedVisits.has(visitId)) collapsedVisits.delete(visitId);
+  else collapsedVisits.add(visitId);
+  render();
+}
+function renderVisitCard(room, v){
+  const locked = isLocked();
+  const collapsed = collapsedVisits.has(v.id);
+  const total = v.payments.reduce((s,p)=>s+(Number(p.amount)||0), 0);
+  const bookingLabel = v.bookingStart ? `예약 ${v.bookingStart}~${v.bookingEnd}` : '시간 미지정';
+  const summaryBar = `
+    <div class="visit-summary-bar" onclick="toggleVisitCollapse('${v.id}')">
+      <span class="collapse-arrow">${collapsed?'▶':'▼'}</span>
+      <b>${escHtml(v.customer)||'(이름 미입력)'}</b>
+      <span class="visit-summary-meta">${bookingLabel}${v.phone?` · ☎ ${escHtml(v.phone)}`:''} · 결제 ${fmt(total)}원</span>
+    </div>
+  `;
+  if(collapsed){
+    return `<div class="visit-card">${summaryBar}</div>`;
+  }
+  return `
+    <div class="visit-card">
+      ${summaryBar}
+      <div class="visit-head">
+        <label style="font-size:12px;color:#888;">예약 시간(상황판 연동):</label>
+        <select ${locked?'disabled':''} onchange="setBookingRange('${room}','${v.id}','start',this.value)">
+          <option value="" ${!v.bookingStart?'selected':''}>미지정</option>
+          ${BOARD_SLOTS.map(s=>`<option value="${s}" ${v.bookingStart===s?'selected':''}>${s}</option>`).join('')}
+        </select>
+        ~
+        <select ${locked||!v.bookingStart?'disabled':''} onchange="setBookingRange('${room}','${v.id}','end',this.value)">
+          ${v.bookingStart ? endTimeOptions(v.bookingStart).map(o=>`<option value="${o}" ${v.bookingEnd===o?'selected':''}>${o}</option>`).join('') : '<option>-</option>'}
+        </select>
+        <input type="text" class="customer" placeholder="예약자 이름" value="${escAttr(v.customer)}" ${locked?'disabled':''} oninput="setCustomer('${room}','${v.id}',this.value)" onblur="render()">
+        <input type="tel" class="phone" placeholder="연락처(선택)" value="${escAttr(v.phone||'')}" ${locked?'disabled':''} oninput="setPhone('${room}','${v.id}',this.value)" onblur="render()">
+      </div>
+
+      <div class="payments">
+        ${v.payments.map(p=>renderPaymentRow(room, v.id, p)).join('')}
+      </div>
+      <button class="btn small" ${locked?'disabled':''} onclick="addPayment('${room}','${v.id}')">+ 결제 추가</button>
+
+      <div class="birdie-row">
+        🐦 버디 횟수:
+        <input type="number" min="0" value="${v.birdieCount||0}" ${locked?'disabled':''} onchange="setBirdie('${room}','${v.id}',this.value)">
+        회 → 지급액 <b>${fmt((v.birdieCount||0)*100)}</b>원
+      </div>
+
+      <div class="visit-foot">
+        <span></span>
+        <button class="btn small danger" ${locked?'disabled':''} onclick="removeVisit('${room}','${v.id}')">방문 삭제</button>
+      </div>
+    </div>
+  `;
+}
+
+function renderPaymentRow(room, visitId, p){
+  const locked = isLocked();
+  return `
+    <div class="pay-row">
+      <select ${locked?'disabled':''} onchange="updatePayment('${room}','${visitId}','${p.id}','type',this.value)">
+        ${PAY_TYPES.map(t=>`<option value="${t.key}" ${p.type===t.key?'selected':''}>${t.label}</option>`).join('')}
+      </select>
+      <div class="method-btns">
+        ${METHODS.map(m=>`<div class="method-btn ${m.key} ${p.method===m.key?'active':''}" onclick="updatePayment('${room}','${visitId}','${p.id}','method','${m.key}')">${m.label}</div>`).join('')}
+      </div>
+      <input class="amount" type="number" min="0" step="100" value="${p.amount}" ${locked?'disabled':''} onchange="updatePayment('${room}','${visitId}','${p.id}','amount',this.value)"> 원
+      <input class="memo" type="text" placeholder="메모(예: 맥주, 8000x2)" value="${escAttr(p.memo||'')}" ${locked?'disabled':''} oninput="updatePaymentQuiet('${room}','${visitId}','${p.id}','memo',this.value)">
+      <span class="x" style="cursor:pointer;color:#888;" onclick="removePayment('${room}','${visitId}','${p.id}')">✕</span>
+    </div>
+  `;
+}
+
+function payTypeLabel(key){ const t = PAY_TYPES.find(t=>t.key===key); return t ? t.label : key; }
+function methodLabel(key){ const m = METHODS.find(m=>m.key===key); return m ? m.label : key; }
+
+function renderAllRoomsTable(){
+  const rows = [];
+  ROOMS.forEach(room=>{
+    (state.log.rooms[room]||[]).forEach(v=>{
+      const total = v.payments.reduce((s,p)=>s+(Number(p.amount)||0), 0);
+      const paymentsText = v.payments.length
+        ? v.payments.map(p=>`${payTypeLabel(p.type)} ${fmt(p.amount)}원(${methodLabel(p.method)})${p.memo?` - ${escHtml(p.memo)}`:''}`).join('<br>')
+        : '<span style="color:#bbb;">-</span>';
+      rows.push(`<tr>
+        <td class="label">${ROOM_LABEL[room]||room}</td>
+        <td class="label">${v.bookingStart ? `${v.bookingStart}~${v.bookingEnd}` : '-'}</td>
+        <td class="label">${escHtml(v.customer)||'-'}</td>
+        <td class="label">${v.phone ? escHtml(v.phone) : '-'}</td>
+        <td class="label">${paymentsText}</td>
+        <td><b>${fmt(total)}</b>원</td>
+      </tr>`);
+    });
+  });
+  return `
+    <div class="list-table-wrap">
+      <h2 style="font-size:15px;margin-top:0;">전체 룸 — 방문별 결제 내역</h2>
+      <table>
+        <tr><th class="label">룸</th><th class="label">시간</th><th class="label">예약자</th><th class="label">연락처</th><th class="label">결제 내역</th><th>방문 합계</th></tr>
+        ${rows.join('') || '<tr><td colspan="6" style="text-align:center;color:#999;">입력된 방문이 없습니다</td></tr>'}
+      </table>
+    </div>
+  `;
+}
+
+function renderPracticeSection(){
+  const list = state.log.practice || [];
+  const locked = isLocked();
+  return `
+    <div class="practice-section">
+      <b>연습장 매출</b>
+      <div class="${locked?'locked-area':''}" style="margin-top:8px;">
+        ${list.map(p=>`
+          <div class="practice-row">
+            <div class="method-btns">
+              ${METHODS.map(m=>`<div class="method-btn ${m.key} ${p.method===m.key?'active':''}" onclick="updatePractice('${p.id}','method','${m.key}')">${m.label}</div>`).join('')}
+            </div>
+            <input class="amount" type="number" min="0" step="500" value="${p.amount}" onchange="updatePractice('${p.id}','amount',this.value)"> 원
+            ${(p.amount<10000||p.amount>15000) && p.amount>0 ? '<span class="warn">⚠ 일반 범위(10,000~15,000)를 벗어남 - 확인 필요</span>' : ''}
+            <span class="x" style="cursor:pointer;color:#888;" onclick="removePractice('${p.id}')">✕</span>
+          </div>
+        `).join('')}
+      </div>
+      <button class="btn small" ${locked?'disabled':''} onclick="addPractice()">+ 연습장 매출 추가</button>
+    </div>
+  `;
+}
+
+function renderSummaryTable(summary){
+  return `
+    <div class="summary">
+      <h2>📋 수입 및 지출 요약</h2>
+      <table>
+        <tr><th class="label">항목</th><th>현금</th><th>카드</th><th>이체</th><th>합계</th></tr>
+        ${ROOMS.map(r=>{
+          const rt = summary.roomTotals[r];
+          const tot = rt.cash+rt.card+rt.transfer;
+          if(tot===0) return '';
+          return `<tr><td class="label">${ROOM_LABEL[r]||r}</td><td>${fmt(rt.cash)}</td><td>${fmt(rt.card)}</td><td>${fmt(rt.transfer)}</td><td><b>${fmt(tot)}</b></td></tr>`;
+        }).join('')}
+        <tr><td class="label">연습장 매출(비고)</td><td>${fmt(summary.practiceTotals.cash)}</td><td>${fmt(summary.practiceTotals.card)}</td><td>${fmt(summary.practiceTotals.transfer)}</td><td><b>${fmt(summary.practiceTotals.cash+summary.practiceTotals.card+summary.practiceTotals.transfer)}</b></td></tr>
+        <tr class="grand-row"><td class="label">총 수입 합계</td><td>${fmt(summary.totals.cash)}</td><td>${fmt(summary.totals.card)}</td><td>${fmt(summary.totals.transfer)}</td><td>${fmt(summary.grandTotal)}</td></tr>
+      </table>
+      <table style="margin-top:12px;">
+        <tr><th class="label">SG (홀인원 응모 총액)</th><td>${fmt(summary.sgTotal)}원</td></tr>
+        <tr><th class="label">버디 지급 총액</th><td>${fmt(summary.birdieTotal)}원 (총 ${summary.birdieCountSum}개)</td></tr>
+      </table>
+    </div>
+  `;
+}
+
+// ---------- list / stats view ----------
+function renderListView(){
+  const dates = listAllDates();
+  const months = Array.from(new Set(dates.map(d=>d.slice(0,7)))).sort().reverse();
+  if(!state.listMonth || !months.includes(state.listMonth)){
+    state.listMonth = months[0] || state.currentDate.slice(0,7);
+  }
+  const monthDates = dates.filter(d=>d.startsWith(state.listMonth));
+
+  let monthTotals = {cash:0,card:0,transfer:0};
+  let monthSg=0, monthBirdie=0;
+  const roomMonthTotals = Object.fromEntries(ROOMS.map(r=>[r,{cash:0,card:0,transfer:0}]));
+  const rows = monthDates.map(d=>{
+    const log = loadLog(d);
+    const s = computeSummary(log);
+    monthTotals.cash+=s.totals.cash; monthTotals.card+=s.totals.card; monthTotals.transfer+=s.totals.transfer;
+    monthSg += s.sgTotal; monthBirdie += s.birdieTotal;
+    ROOMS.forEach(r=>{
+      roomMonthTotals[r].cash += s.roomTotals[r].cash;
+      roomMonthTotals[r].card += s.roomTotals[r].card;
+      roomMonthTotals[r].transfer += s.roomTotals[r].transfer;
+    });
+    return `<tr>
+      <td class="label"><a href="#" onclick="loadDateIntoEditor('${d}');return false;">${d} (${weekdayLabel(d)})</a> ${log.closed?'🔒':''}</td>
+      <td class="label">${escHtml(log.staff||'-')}</td>
+      <td>${fmt(s.totals.cash)}</td><td>${fmt(s.totals.card)}</td><td>${fmt(s.totals.transfer)}</td>
+      <td><b>${fmt(s.grandTotal)}</b></td>
+      <td class="row-actions">
+        <button class="btn small" onclick="loadDateIntoEditor('${d}')">편집</button>
+        <button class="btn small danger" onclick="deleteDateRow('${d}')">삭제</button>
+      </td>
+    </tr>`;
+  }).join('');
+
+  return `
+    ${renderNav()}
+    <div class="topbar">
+      <label>월 선택</label>
+      <select class="month-select" onchange="state.listMonth=this.value;render()">
+        ${months.map(m=>`<option value="${m}" ${m===state.listMonth?'selected':''}>${m}</option>`).join('')}
+      </select>
+    </div>
+
+    <div class="list-table-wrap">
+      <h2 style="font-size:15px;margin-top:0;">${state.listMonth} 일별 매출</h2>
+      <table>
+        <tr><th class="label">날짜</th><th class="label">담당자</th><th>현금</th><th>카드</th><th>이체</th><th>합계</th><th>관리</th></tr>
+        ${rows || '<tr><td colspan="7" style="text-align:center;color:#999;">저장된 일지가 없습니다</td></tr>'}
+        <tr class="grand-row"><td class="label">월 합계</td><td></td><td>${fmt(monthTotals.cash)}</td><td>${fmt(monthTotals.card)}</td><td>${fmt(monthTotals.transfer)}</td><td>${fmt(monthTotals.cash+monthTotals.card+monthTotals.transfer)}</td><td></td></tr>
+      </table>
+    </div>
+
+    <div class="list-table-wrap">
+      <h2 style="font-size:15px;margin-top:0;">${state.listMonth} 룸별 매출</h2>
+      <table>
+        <tr><th class="label">룸</th><th>현금</th><th>카드</th><th>이체</th><th>합계</th></tr>
+        ${ROOMS.map(r=>{
+          const rt = roomMonthTotals[r];
+          const tot = rt.cash+rt.card+rt.transfer;
+          return `<tr><td class="label">${ROOM_LABEL[r]||r}</td><td>${fmt(rt.cash)}</td><td>${fmt(rt.card)}</td><td>${fmt(rt.transfer)}</td><td><b>${fmt(tot)}</b></td></tr>`;
+        }).join('')}
+      </table>
+    </div>
+
+    <div class="list-table-wrap">
+      <h2 style="font-size:15px;margin-top:0;">${state.listMonth} 기타 집계</h2>
+      <table>
+        <tr><th class="label">SG(홀인원 응모) 총액</th><td>${fmt(monthSg)}원</td></tr>
+        <tr><th class="label">버디 지급 총액</th><td>${fmt(monthBirdie)}원</td></tr>
+      </table>
+    </div>
+  `;
+}
+
+function loadDateIntoEditor(date){
+  state.currentDate = date;
+  state.log = loadLog(date);
+  state.view = 'edit';
+  render();
+}
+function deleteDateRow(date){
+  const log = loadLog(date);
+  if(log.closed && !isAdmin()){
+    alert('마감된 일지는 관리자만 삭제할 수 있습니다.');
+    return;
+  }
+  if(!confirm(`${date} 일지를 삭제할까요? 되돌릴 수 없습니다.`)) return;
+  if(log.closed && isAdmin()){
+    addAudit(date, 'ADMIN_EDIT_ON_CLOSED', '관리자가 마감된 일지를 삭제함');
+  }
+  deleteLogDate(date);
+  render();
+}
+
+// ---------- admin view ----------
+function renderAdminView(){
+  if(!isAdmin()){
+    return `${renderNav()}<div class="summary"><p>관리자 로그인이 필요합니다.</p></div>`;
+  }
+  const staffList = getStaffList();
+  const audit = getAudit().slice().reverse();
+  return `
+    ${renderNav()}
+    <div class="summary" style="margin-bottom:14px;">
+      <h2>🔑 관리자 비밀번호</h2>
+      <p style="font-size:13px;color:#666;">비밀번호는 이 브라우저에만 저장됩니다. 다른 컴퓨터에서는 적용되지 않습니다.</p>
+      <button class="btn" onclick="changeAdminPassword()">비밀번호 변경</button>
+    </div>
+
+    <div class="summary" style="margin-bottom:14px;">
+      <h2>👥 직원 계정 관리</h2>
+      ${staffList.length ? staffList.map(s=>`
+        <div class="staff-row">
+          <span style="min-width:120px;">${escHtml(s.name)}</span>
+          <button class="btn small" onclick="resetStaffPassword('${s.id}')">비밀번호 재설정</button>
+          <button class="btn small danger" onclick="removeStaffAccount('${s.id}')">삭제</button>
+        </div>
+      `).join('') : '<p style="font-size:13px;color:#999;">등록된 직원이 없습니다.</p>'}
+      <button class="btn" style="margin-top:6px;" onclick="addStaffAccount()">+ 직원 추가</button>
+    </div>
+
+    <div class="list-table-wrap">
+      <h2 style="font-size:15px;margin-top:0;">📜 변경 이력 (담당자 교대 · 마감 처리 · 마감 후 수정/삭제 · 비밀번호/계정 변경)</h2>
+      <table>
+        <tr><th class="label">시각</th><th class="label">날짜</th><th class="label">종류</th><th class="label">내용</th></tr>
+        ${audit.length ? audit.map(a=>`
+          <tr>
+            <td class="label">${new Date(a.ts).toLocaleString('ko-KR')}</td>
+            <td class="label">${escHtml(a.date||'-')}</td>
+            <td class="label">${escHtml(AUDIT_TYPE_LABEL[a.type]||a.type)}</td>
+            <td class="label">${escHtml(a.detail)}</td>
+          </tr>
+        `).join('') : '<tr><td colspan="4" style="text-align:center;color:#999;">기록 없음</td></tr>'}
+      </table>
+    </div>
+  `;
+}
+
+// ---------- escaping ----------
+function escHtml(s){ return String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function escAttr(s){ return escHtml(s); }
+
+(async function init(){
+  await ensureAdminHash();
+  try{
+    const saved = sessionStorage.getItem(SESSION_KEY);
+    if(saved) session = JSON.parse(saved);
+  }catch(e){ session = null; }
+  await initDataFolder();
+  render();
+})();
+</script>
+</body>
+</html>
