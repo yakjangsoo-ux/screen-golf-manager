@@ -123,13 +123,14 @@
   .lock-banner.admin-mode{background:#e6f4ff;border-color:#a9d4ff;color:#0b4a8f;}
 
   .board-wrap{overflow-x:auto;background:var(--card-white);border:1px solid var(--line);border-radius:8px;padding:12px;margin-bottom:14px;}
-  .board-table{border-collapse:collapse;font-size:11px;}
+  .board-table{border-collapse:collapse;font-size:11px;user-select:none;}
   .board-table th, .board-table td{border:1px solid var(--line);padding:0;text-align:center;white-space:nowrap;}
   .board-table th{background:#f0f0f0;padding:4px 3px;font-size:10px;font-weight:normal;color:#666;}
   .board-room-col{position:sticky;left:0;background:#f0f0f0;z-index:2;padding:4px 10px !important;text-align:left;font-weight:bold;font-size:12px;}
   .board-cell{width:32px;height:38px;cursor:pointer;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:0 3px;}
   .board-cell.free{background:#fff;}
   .board-cell.free:hover{background:#eef7e3;}
+  .board-cell.free.selecting{background:var(--accent) !important;opacity:0.5;}
   .board-cell.occupied{color:#7a2050;font-weight:bold;}
   .board-cell.occupied:hover{filter:brightness(0.93);}
   .board-legend{font-size:11px;color:#888;margin-top:8px;}
@@ -553,7 +554,47 @@ function getVisit(room, visitId){
 }
 
 // ---------- board (occupancy grid) ----------
-function openBookingDialog(room, start){
+// Drag-to-select: mousedown on a free cell starts tracking; mouseenter over
+// subsequent free cells in the same room row extends the selection (entering
+// an occupied cell or a different room simply stops extending, it doesn't
+// error); mouseup anywhere finalizes and opens the booking dialog with the
+// dragged range pre-filled. A plain click (no real drag) behaves exactly as
+// before — startSlot===endSlot, so openBookingDialog falls back to its
+// default ~1 hour suggestion.
+let boardDrag = null; // { room, startSlot, endSlot } while dragging on the board
+function startBoardDrag(room, slot){
+  boardDrag = { room, startSlot: slot, endSlot: slot };
+  highlightBoardDrag();
+}
+function extendBoardDrag(room, slot){
+  if(!boardDrag || boardDrag.room !== room) return;
+  boardDrag.endSlot = slot;
+  highlightBoardDrag();
+}
+function highlightBoardDrag(){
+  document.querySelectorAll('.board-cell.selecting').forEach(el=>el.classList.remove('selecting'));
+  if(!boardDrag) return;
+  const lo = Math.min(BOARD_SLOTS.indexOf(boardDrag.startSlot), BOARD_SLOTS.indexOf(boardDrag.endSlot));
+  const hi = Math.max(BOARD_SLOTS.indexOf(boardDrag.startSlot), BOARD_SLOTS.indexOf(boardDrag.endSlot));
+  for(let i=lo;i<=hi;i++){
+    const el = document.querySelector(`.board-cell[data-room="${boardDrag.room}"][data-slot="${BOARD_SLOTS[i]}"]`);
+    if(el) el.classList.add('selecting');
+  }
+}
+function finishBoardDrag(){
+  if(!boardDrag) return;
+  const { room, startSlot, endSlot } = boardDrag;
+  document.querySelectorAll('.board-cell.selecting').forEach(el=>el.classList.remove('selecting'));
+  boardDrag = null;
+  const lo = Math.min(BOARD_SLOTS.indexOf(startSlot), BOARD_SLOTS.indexOf(endSlot));
+  const hi = Math.max(BOARD_SLOTS.indexOf(startSlot), BOARD_SLOTS.indexOf(endSlot));
+  const start = BOARD_SLOTS[lo];
+  // Only pass an explicit end when a real drag happened (more than one slot
+  // selected) — a plain click keeps openBookingDialog's own ~1 hour default.
+  const end = hi > lo ? slotEnd(BOARD_SLOTS[hi]) : undefined;
+  openBookingDialog(room, start, end);
+}
+function openBookingDialog(room, start, end){
   // Uses isLocked() (not guardEdit()) deliberately: opening the dialog isn't
   // itself a data change, so it shouldn't write an audit entry. guardEdit()
   // runs (and logs, if applicable) once the booking is actually submitted.
@@ -561,7 +602,7 @@ function openBookingDialog(room, start){
     alert('마감된 일지입니다. 관리자만 예약을 추가할 수 있습니다.');
     return;
   }
-  bookingDialog = { room, start };
+  bookingDialog = { room, start, end };
   render();
 }
 function closeBookingDialog(){
@@ -838,7 +879,7 @@ function renderBoard(){
           return `<tr><td class="board-room-col">${ROOM_LABEL[room]||room}</td>${renderBoardRow(room, visits, c.label)}</tr>`;
         }).join('')}
       </table>
-      <div class="board-legend"><span class="board-cell-demo free"></span>예약 가능(클릭 시 예약)<span class="board-cell-demo occupied"></span>예약됨(클릭 시 아래 방문 정보로 이동, 예약자 이름 표시)</div>
+      <div class="board-legend"><span class="board-cell-demo free"></span>예약 가능(클릭 시 예약, 드래그하면 시작/종료 시간이 자동 설정됨)<span class="board-cell-demo occupied"></span>예약됨(클릭 시 아래 방문 정보로 이동, 예약자 이름 표시)</div>
     </div>
     ${renderBookingDialog()}
   `;
@@ -863,7 +904,7 @@ function renderBoardRow(room, visits, occupiedColor){
       html += `<td class="board-cell occupied" style="background:${occupiedColor};" title="${escAttr(owner.customer||'')}" onclick="focusVisitFromBoard('${room}','${owner.id}')"></td>`;
       i += 1;
     } else {
-      html += `<td class="board-cell free" title="${slot} 예약하기" onclick="openBookingDialog('${room}','${slot}')"></td>`;
+      html += `<td class="board-cell free" data-room="${room}" data-slot="${slot}" title="${slot} 예약하기(드래그로 시간대 선택 가능)" onmousedown="startBoardDrag('${room}','${slot}')" onmouseenter="extendBoardDrag('${room}','${slot}')"></td>`;
       i += 1;
     }
   }
@@ -871,9 +912,9 @@ function renderBoardRow(room, visits, occupiedColor){
 }
 function renderBookingDialog(){
   if(!bookingDialog) return '';
-  const { room, start } = bookingDialog;
+  const { room, start, end } = bookingDialog;
   const endOptions = endTimeOptions(start);
-  const defaultEnd = endOptions[Math.min(1, endOptions.length-1)];
+  const defaultEnd = (end && endOptions.includes(end)) ? end : endOptions[Math.min(1, endOptions.length-1)];
   return `
     <div class="modal-backdrop" onclick="if(event.target===this)closeBookingDialog()">
       <div class="modal-box">
@@ -1327,6 +1368,7 @@ function escAttr(s){ return escHtml(s); }
   }catch(e){ session = null; }
   state.log = await loadLog(state.currentDate);
   render();
+  document.addEventListener('mouseup', ()=>{ if(boardDrag) finishBoardDrag(); });
 })();
 </script>
 </body>
