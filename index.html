@@ -904,7 +904,7 @@ function renderBoardRow(room, visits, occupiedColor){
       html += `<td class="board-cell occupied" style="background:${occupiedColor};" title="${escAttr(owner.customer||'')}" onclick="focusVisitFromBoard('${room}','${owner.id}')"></td>`;
       i += 1;
     } else {
-      html += `<td class="board-cell free" data-room="${room}" data-slot="${slot}" title="${slot} 예약하기(드래그로 시간대 선택 가능)" onmousedown="startBoardDrag('${room}','${slot}')" onmouseenter="extendBoardDrag('${room}','${slot}')"></td>`;
+      html += `<td class="board-cell free" data-room="${room}" data-slot="${slot}" title="${slot} 예약하기(드래그로 시간대 선택 가능)" onmousedown="event.preventDefault();startBoardDrag('${room}','${slot}')" onmouseenter="extendBoardDrag('${room}','${slot}')"></td>`;
       i += 1;
     }
   }
