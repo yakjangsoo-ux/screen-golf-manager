@@ -659,12 +659,16 @@ function setBookingRange(room, visitId, field, value){
   noteCrossStaffEdit(room, v, `예약 시간 변경 (${oldRange} → ${newStart}~${newEnd})`);
   persistAndRender();
 }
-// Clicking a booked slot on the board jumps to and expands that visit's
-// card in the room panel below, rather than deleting it — deletion now only
-// happens from the room panel's own "방문 삭제" button.
+// Clicking a booked slot on the board jumps to that visit's card in the room
+// panel below and expands only it — every other card in that room folds, so
+// the one you picked is easy to find — rather than deleting it (deletion now
+// only happens from the room panel's own "방문 삭제" button).
 function focusVisitFromBoard(room, visitId){
   state.activeRoom = room;
-  collapsedVisits.delete(visitId);
+  (state.log.rooms[room] || []).forEach(v=>{
+    if(v.id === visitId) collapsedVisits.delete(v.id);
+    else collapsedVisits.add(v.id);
+  });
   render();
   const el = document.getElementById('visit-' + visitId);
   if(el) el.scrollIntoView({ behavior:'smooth', block:'center' });
