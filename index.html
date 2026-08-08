@@ -618,18 +618,15 @@ function setBookingRange(room, visitId, field, value){
   noteCrossStaffEdit(room, v, `예약 시간 변경 (${oldRange} → ${newStart}~${newEnd})`);
   persistAndRender();
 }
-function cancelBookingFromBoard(room, visitId){
-  if(!guardEdit()) return;
-  const v = getVisit(room, visitId);
-  if(!v) return;
-  if(v.payments && v.payments.length > 0){
-    alert(`"${v.customer||'이름없음'}"님 예약에는 이미 결제 내역(${v.payments.length}건)이 입력되어 있어 상황판에서 바로 삭제할 수 없습니다.\n삭제하려면 "${ROOM_LABEL[room]||room}" 탭에서 방문 카드를 열어 결제 내역을 확인한 뒤 "방문 삭제"를 이용해주세요.`);
-    return;
-  }
-  if(!confirm(`"${v.customer||'이름없음'}"님의 예약(${v.bookingStart}~${v.bookingEnd})을 취소(삭제)할까요?`)) return;
-  noteCrossStaffEdit(room, v, '상황판에서 예약 취소(삭제)');
-  state.log.rooms[room] = state.log.rooms[room].filter(x=>x.id!==visitId);
-  persistAndRender();
+// Clicking a booked slot on the board jumps to and expands that visit's
+// card in the room panel below, rather than deleting it — deletion now only
+// happens from the room panel's own "방문 삭제" button.
+function focusVisitFromBoard(room, visitId){
+  state.activeRoom = room;
+  collapsedVisits.delete(visitId);
+  render();
+  const el = document.getElementById('visit-' + visitId);
+  if(el) el.scrollIntoView({ behavior:'smooth', block:'center' });
 }
 function setCustomer(room, visitId, v){
   if(isBlockedForEdit()) return;
@@ -841,7 +838,7 @@ function renderBoard(){
           return `<tr><td class="board-room-col">${ROOM_LABEL[room]||room}</td>${renderBoardRow(room, visits, c.label)}</tr>`;
         }).join('')}
       </table>
-      <div class="board-legend"><span class="board-cell-demo free"></span>예약 가능(클릭 시 예약)<span class="board-cell-demo occupied"></span>예약됨(클릭 시 취소, 예약자 이름 표시)</div>
+      <div class="board-legend"><span class="board-cell-demo free"></span>예약 가능(클릭 시 예약)<span class="board-cell-demo occupied"></span>예약됨(클릭 시 아래 방문 정보로 이동, 예약자 이름 표시)</div>
     </div>
     ${renderBookingDialog()}
   `;
@@ -858,13 +855,12 @@ function renderBoardRow(room, visits, occupiedColor){
     const owner = visits.find(v=>v.bookingStart && v.bookingEnd && slot >= v.bookingStart && slot < v.bookingEnd);
     if(owner && slot === owner.bookingStart){
       const span = Math.max(1, Math.round((toMinutes(owner.bookingEnd) - toMinutes(owner.bookingStart)) / 30));
-      const hasPayments = owner.payments && owner.payments.length > 0;
-      const tip = `${owner.customer||''}${owner.phone?' ☎'+owner.phone:''} (${owner.bookingStart}~${owner.bookingEnd})${hasPayments?' · 결제 있음(상황판 삭제 불가)':''}`;
-      html += `<td class="board-cell occupied" colspan="${span}" style="background:${occupiedColor};" title="${escAttr(tip)}" onclick="cancelBookingFromBoard('${room}','${owner.id}')">${hasPayments?'🔒 ':''}${escHtml(owner.customer||'')}</td>`;
+      const tip = `${owner.customer||''}${owner.phone?' ☎'+owner.phone:''} (${owner.bookingStart}~${owner.bookingEnd})`;
+      html += `<td class="board-cell occupied" colspan="${span}" style="background:${occupiedColor};" title="${escAttr(tip)}" onclick="focusVisitFromBoard('${room}','${owner.id}')">${escHtml(owner.customer||'')}</td>`;
       i += span;
     } else if(owner){
       // Defensive fallback for pre-existing overlapping data; normal use never reaches this.
-      html += `<td class="board-cell occupied" style="background:${occupiedColor};" title="${escAttr(owner.customer||'')}" onclick="cancelBookingFromBoard('${room}','${owner.id}')"></td>`;
+      html += `<td class="board-cell occupied" style="background:${occupiedColor};" title="${escAttr(owner.customer||'')}" onclick="focusVisitFromBoard('${room}','${owner.id}')"></td>`;
       i += 1;
     } else {
       html += `<td class="board-cell free" title="${slot} 예약하기" onclick="openBookingDialog('${room}','${slot}')"></td>`;
@@ -971,10 +967,10 @@ function renderVisitCard(room, v){
     </div>
   `;
   if(collapsed){
-    return `<div class="visit-card">${summaryBar}</div>`;
+    return `<div class="visit-card" id="visit-${v.id}">${summaryBar}</div>`;
   }
   return `
-    <div class="visit-card">
+    <div class="visit-card" id="visit-${v.id}">
       ${summaryBar}
       <div class="visit-head">
         <label style="font-size:12px;color:#888;">예약 시간(상황판 연동):</label>
