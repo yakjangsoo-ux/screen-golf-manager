@@ -121,7 +121,6 @@
   .locked-area{opacity:0.55;pointer-events:none;}
   .lock-banner{background:#fff3cd;border:1px solid #ffe58a;color:#7a5b00;padding:8px 12px;border-radius:8px;margin-bottom:12px;font-size:13px;}
   .lock-banner.admin-mode{background:#e6f4ff;border-color:#a9d4ff;color:#0b4a8f;}
-  .folder-status{font-size:12px;color:#888;}
 
   .board-wrap{overflow-x:auto;background:var(--card-white);border:1px solid var(--line);border-radius:8px;padding:12px;margin-bottom:14px;}
   .board-table{border-collapse:collapse;font-size:11px;}
@@ -156,6 +155,7 @@
 
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
 <script>
 const FIREBASE_CONFIG = {
   projectId: "screen-golf-manager",
@@ -236,7 +236,6 @@ const AUDIT_TYPE_LABEL = {
 
 let session = null; // { role:'admin', name:'admin' } or { role:'staff', name:'홍길동' }
 function isAdmin(){ return !!(session && session.role === 'admin'); }
-let dataDirHandle = null; // File System Access API handle to the "data" folder, if connected
 
 function uid(){ return 'id' + Date.now().toString(36) + Math.random().toString(36).slice(2,8); }
 function todayStr(){
@@ -279,7 +278,6 @@ function saveLog(log){
   // Fire-and-forget: state.log in memory is already the source of truth for
   // this session, so callers don't need to wait on the write to finish.
   db.collection('logs').doc(log.date).set(log).catch(err=>console.warn('일지 저장 실패:', err));
-  writeLogToFolder(log); // best-effort mirror to a real file, if a data folder is connected
 }
 function deleteLogDate(date){
   return db.collection('logs').doc(date).delete();
@@ -472,78 +470,6 @@ function reopenDay(){
   delete state.log.closedBy;
   addAudit(state.log.date, 'REOPEN', `관리자(${session.name})가 마감을 취소함 (기존 마감자: ${prevCloser})`);
   persistAndRender();
-}
-
-// ---------- optional: mirror saves to a real "data" folder ----------
-function idbOpen(){
-  return new Promise((resolve, reject)=>{
-    const req = indexedDB.open('sgledger-fs', 1);
-    req.onupgradeneeded = ()=>{ req.result.createObjectStore('handles'); };
-    req.onsuccess = ()=>resolve(req.result);
-    req.onerror = ()=>reject(req.error);
-  });
-}
-async function idbSaveHandle(handle){
-  const db = await idbOpen();
-  return new Promise((resolve, reject)=>{
-    const tx = db.transaction('handles','readwrite');
-    tx.objectStore('handles').put(handle, 'dataDir');
-    tx.oncomplete = ()=>resolve();
-    tx.onerror = ()=>reject(tx.error);
-  });
-}
-async function idbLoadHandle(){
-  try{
-    const db = await idbOpen();
-    return new Promise(resolve=>{
-      const tx = db.transaction('handles','readonly');
-      const req = tx.objectStore('handles').get('dataDir');
-      req.onsuccess = ()=>resolve(req.result || null);
-      req.onerror = ()=>resolve(null);
-    });
-  }catch(e){ return null; }
-}
-async function initDataFolder(){
-  try{
-    if(!window.showDirectoryPicker) return;
-    const saved = await idbLoadHandle();
-    if(saved && (await saved.queryPermission({mode:'readwrite'})) === 'granted'){
-      dataDirHandle = saved;
-    }
-  }catch(e){ /* File System Access API unavailable in this context (e.g. some file:// setups) */ }
-}
-async function connectDataFolder(){
-  if(!isAdmin()){
-    alert('데이터 폴더 연결은 관리자만 할 수 있습니다.');
-    return;
-  }
-  if(!window.showDirectoryPicker){
-    alert('이 브라우저는 폴더 자동 저장을 지원하지 않습니다 (Chrome 또는 Edge 최신 버전 필요).\n대신 "백업(JSON)" 버튼으로 수동 저장해주세요. 데이터는 계속 이 브라우저에 자동 저장됩니다.');
-    return;
-  }
-  try{
-    const handle = await window.showDirectoryPicker({ id:'sgledger-data', mode:'readwrite' });
-    dataDirHandle = handle;
-    try{ await idbSaveHandle(handle); }catch(e){}
-    alert(`"${handle.name}" 폴더에 연결되었습니다. 앞으로 저장할 때마다 이 폴더 아래 월별 폴더(예: 2026-08)에 파일이 자동으로 기록됩니다.\nindex.html 옆에 만든 "data" 폴더를 선택하는 것을 권장합니다.`);
-    render();
-  }catch(err){
-    if(err && err.name === 'AbortError') return;
-    alert('폴더 연결에 실패했습니다: ' + (err && err.message ? err.message : err));
-  }
-}
-async function writeLogToFolder(log){
-  if(!dataDirHandle) return;
-  try{
-    const month = log.date.slice(0,7);
-    const monthDir = await dataDirHandle.getDirectoryHandle(month, { create:true });
-    const fileHandle = await monthDir.getFileHandle(`${log.date}.json`, { create:true });
-    const writable = await fileHandle.createWritable();
-    await writable.write(JSON.stringify(log, null, 2));
-    await writable.close();
-  }catch(err){
-    console.warn('데이터 폴더 파일 저장 실패:', err);
-  }
 }
 
 let state = {
@@ -986,7 +912,6 @@ function renderEditView(){
       <span class="method-tag" style="background:#eef2ff;color:var(--accent);">담당자: ${escHtml(log.staff || session.name)}</span>
       <div class="spacer"></div>
       <span class="autosave-badge" id="lastSavedBadge">${lastSavedAt ? '✔ 마지막 저장 ' + lastSavedAt.toLocaleTimeString('ko-KR') : '자동 저장 대기중'}</span>
-      ${isAdmin() ? `<button class="btn folder-status" onclick="connectDataFolder()">📁 ${dataDirHandle ? '데이터 폴더 연결됨' : '데이터 폴더 연결'}</button>` : ''}
     </div>
 
     ${renderBoard()}
@@ -1278,6 +1203,43 @@ async function deleteDateRow(date){
 }
 
 // ---------- admin view ----------
+async function exportDateToExcel(date){
+  if(!date) { alert('날짜를 선택하세요.'); return; }
+  const log = await loadLog(date);
+  const summary = computeSummary(log);
+
+  const visitRows = [['룸','예약시간','예약자','연락처','항목','결제수단','금액','메모']];
+  ROOMS.forEach(room=>{
+    (log.rooms[room]||[]).forEach(v=>{
+      const time = v.bookingStart ? `${v.bookingStart}~${v.bookingEnd}` : '';
+      if(v.payments.length===0){
+        visitRows.push([ROOM_LABEL[room]||room, time, v.customer||'', v.phone||'', '', '', '', '']);
+      } else {
+        v.payments.forEach(p=>{
+          visitRows.push([ROOM_LABEL[room]||room, time, v.customer||'', v.phone||'', payTypeLabel(p.type), methodLabel(p.method), Number(p.amount)||0, p.memo||'']);
+        });
+      }
+    });
+  });
+
+  const summaryRows = [['항목','현금','카드','이체','합계']];
+  ROOMS.forEach(r=>{
+    const rt = summary.roomTotals[r];
+    const tot = rt.cash+rt.card+rt.transfer;
+    if(tot===0) return;
+    summaryRows.push([ROOM_LABEL[r]||r, rt.cash, rt.card, rt.transfer, tot]);
+  });
+  summaryRows.push(['연습장 매출', summary.practiceTotals.cash, summary.practiceTotals.card, summary.practiceTotals.transfer, summary.practiceTotals.cash+summary.practiceTotals.card+summary.practiceTotals.transfer]);
+  summaryRows.push(['총 수입 합계', summary.totals.cash, summary.totals.card, summary.totals.transfer, summary.grandTotal]);
+  summaryRows.push([]);
+  summaryRows.push(['SG(홀인원 응모) 총액', summary.sgTotal]);
+  summaryRows.push(['버디 지급 총액', summary.birdieTotal, `총 ${summary.birdieCountSum}개`]);
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(visitRows), '방문내역');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(summaryRows), '요약');
+  XLSX.writeFile(wb, `${date}_스크린골프정산.xlsx`);
+}
 function renderAdminView(){
   if(!isAdmin()){
     return `${renderNav()}<div class="summary"><p>관리자 로그인이 필요합니다.</p></div>`;
@@ -1289,6 +1251,14 @@ function renderAdminView(){
       <h2>🔑 관리자 비밀번호</h2>
       <p style="font-size:13px;color:#666;">비밀번호는 모든 기기에 공통으로 적용됩니다.</p>
       <button class="btn" onclick="changeAdminPassword()">비밀번호 변경</button>
+    </div>
+
+    <div class="summary" style="margin-bottom:14px;">
+      <h2>📥 일지 엑셀 출력</h2>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <input type="date" id="exportDate" value="${state.currentDate}">
+        <button class="btn" onclick="exportDateToExcel(document.getElementById('exportDate').value)">엑셀 다운로드</button>
+      </div>
     </div>
 
     <div class="summary" style="margin-bottom:14px;">
@@ -1332,7 +1302,6 @@ function escAttr(s){ return escHtml(s); }
     const saved = sessionStorage.getItem(SESSION_KEY);
     if(saved) session = JSON.parse(saved);
   }catch(e){ session = null; }
-  await initDataFolder();
   state.log = await loadLog(state.currentDate);
   render();
 })();
