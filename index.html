@@ -1203,42 +1203,65 @@ async function deleteDateRow(date){
 }
 
 // ---------- admin view ----------
-async function exportDateToExcel(date){
-  if(!date) { alert('날짜를 선택하세요.'); return; }
-  const log = await loadLog(date);
-  const summary = computeSummary(log);
-
-  const visitRows = [['룸','예약시간','예약자','연락처','항목','결제수단','금액','메모']];
+const MAX_EXPORT_DAYS = 31; // "최대 1개월치" cap on a single range export
+function dateRange(start, end){
+  const dates = [];
+  const cur = new Date(start + 'T00:00:00');
+  const endD = new Date(end + 'T00:00:00');
+  const pad = n => String(n).padStart(2,'0');
+  while(cur <= endD){
+    dates.push(`${cur.getFullYear()}-${pad(cur.getMonth()+1)}-${pad(cur.getDate())}`);
+    cur.setDate(cur.getDate()+1);
+  }
+  return dates;
+}
+// One sheet's worth of rows for a single date: visit/payment detail rows,
+// then a blank separator, then the same room/method summary shown on-screen.
+function buildDateSheetRows(log, summary){
+  const rows = [['룸','예약시간','예약자','연락처','항목','결제수단','금액','메모']];
   ROOMS.forEach(room=>{
     (log.rooms[room]||[]).forEach(v=>{
       const time = v.bookingStart ? `${v.bookingStart}~${v.bookingEnd}` : '';
       if(v.payments.length===0){
-        visitRows.push([ROOM_LABEL[room]||room, time, v.customer||'', v.phone||'', '', '', '', '']);
+        rows.push([ROOM_LABEL[room]||room, time, v.customer||'', v.phone||'', '', '', '', '']);
       } else {
         v.payments.forEach(p=>{
-          visitRows.push([ROOM_LABEL[room]||room, time, v.customer||'', v.phone||'', payTypeLabel(p.type), methodLabel(p.method), Number(p.amount)||0, p.memo||'']);
+          rows.push([ROOM_LABEL[room]||room, time, v.customer||'', v.phone||'', payTypeLabel(p.type), methodLabel(p.method), Number(p.amount)||0, p.memo||'']);
         });
       }
     });
   });
-
-  const summaryRows = [['항목','현금','카드','이체','합계']];
+  rows.push([]);
+  rows.push(['요약','현금','카드','이체','합계']);
   ROOMS.forEach(r=>{
     const rt = summary.roomTotals[r];
     const tot = rt.cash+rt.card+rt.transfer;
     if(tot===0) return;
-    summaryRows.push([ROOM_LABEL[r]||r, rt.cash, rt.card, rt.transfer, tot]);
+    rows.push([ROOM_LABEL[r]||r, rt.cash, rt.card, rt.transfer, tot]);
   });
-  summaryRows.push(['연습장 매출', summary.practiceTotals.cash, summary.practiceTotals.card, summary.practiceTotals.transfer, summary.practiceTotals.cash+summary.practiceTotals.card+summary.practiceTotals.transfer]);
-  summaryRows.push(['총 수입 합계', summary.totals.cash, summary.totals.card, summary.totals.transfer, summary.grandTotal]);
-  summaryRows.push([]);
-  summaryRows.push(['SG(홀인원 응모) 총액', summary.sgTotal]);
-  summaryRows.push(['버디 지급 총액', summary.birdieTotal, `총 ${summary.birdieCountSum}개`]);
-
+  rows.push(['연습장 매출', summary.practiceTotals.cash, summary.practiceTotals.card, summary.practiceTotals.transfer, summary.practiceTotals.cash+summary.practiceTotals.card+summary.practiceTotals.transfer]);
+  rows.push(['총 수입 합계', summary.totals.cash, summary.totals.card, summary.totals.transfer, summary.grandTotal]);
+  rows.push([]);
+  rows.push(['SG(홀인원 응모) 총액', summary.sgTotal]);
+  rows.push(['버디 지급 총액', summary.birdieTotal, `총 ${summary.birdieCountSum}개`]);
+  return rows;
+}
+async function exportRangeToExcel(start, end){
+  if(!start || !end){ alert('시작일과 종료일을 선택하세요.'); return; }
+  if(start > end){ alert('종료일이 시작일보다 빠를 수 없습니다.'); return; }
+  const dates = dateRange(start, end);
+  if(dates.length > MAX_EXPORT_DAYS){
+    alert(`한 번에 최대 ${MAX_EXPORT_DAYS}일(약 1개월)까지만 받을 수 있습니다. 기간을 줄여주세요.`);
+    return;
+  }
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(visitRows), '방문내역');
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(summaryRows), '요약');
-  XLSX.writeFile(wb, `${date}_스크린골프정산.xlsx`);
+  for(const date of dates){
+    const log = await loadLog(date);
+    const summary = computeSummary(log);
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(buildDateSheetRows(log, summary)), date);
+  }
+  const filename = start === end ? `${start}_스크린골프정산.xlsx` : `${start}~${end}_스크린골프정산.xlsx`;
+  XLSX.writeFile(wb, filename);
 }
 function renderAdminView(){
   if(!isAdmin()){
@@ -1255,9 +1278,13 @@ function renderAdminView(){
 
     <div class="summary" style="margin-bottom:14px;">
       <h2>📥 일지 엑셀 출력</h2>
-      <div style="display:flex;gap:8px;align-items:center;">
-        <input type="date" id="exportDate" value="${state.currentDate}">
-        <button class="btn" onclick="exportDateToExcel(document.getElementById('exportDate').value)">엑셀 다운로드</button>
+      <p style="font-size:12px;color:#888;margin:0 0 8px;">한 번에 최대 ${MAX_EXPORT_DAYS}일(약 1개월)까지 받을 수 있습니다. 날짜별로 탭이 나뉘어 저장됩니다.</p>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+        <label style="font-size:13px;color:#555;">시작일</label>
+        <input type="date" id="exportStart" value="${state.currentDate}">
+        <label style="font-size:13px;color:#555;">종료일</label>
+        <input type="date" id="exportEnd" value="${state.currentDate}">
+        <button class="btn" onclick="exportRangeToExcel(document.getElementById('exportStart').value, document.getElementById('exportEnd').value)">엑셀 다운로드</button>
       </div>
     </div>
 
