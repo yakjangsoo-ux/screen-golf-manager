@@ -474,7 +474,7 @@ function reopenDay(){
 }
 
 let state = {
-  view: 'edit', // 'edit' | 'list' | 'admin'
+  view: 'edit', // 'edit' | 'list' | 'admin' | 'manual'
   currentDate: todayStr(),
   log: null, // populated async by init()
   activeRoom: 'R1',
@@ -803,6 +803,7 @@ function render(){
   if(state.view==='edit') app.innerHTML = renderEditView();
   else if(state.view==='list') app.innerHTML = renderListView();
   else if(state.view==='admin') app.innerHTML = renderAdminView();
+  else if(state.view==='manual') app.innerHTML = renderManualView();
 }
 async function openListView(){
   state.view = 'list';
@@ -853,6 +854,7 @@ function renderNav(){
   return `
     <div class="view-toggle">
       <button class="btn ${state.view==='edit'?'primary':''}" onclick="state.view='edit';render()">✏️ 일지 입력</button>
+      <button class="btn ${state.view==='manual'?'primary':''}" onclick="state.view='manual';render()">📖 사용법</button>
       ${isAdmin() ? `
         <button class="btn ${state.view==='list'?'primary':''}" onclick="openListView()">📊 조회/통계</button>
         <button class="btn ${state.view==='admin'?'primary':''}" onclick="openAdminView()">🛠 관리자 페이지</button>
@@ -864,6 +866,53 @@ function renderNav(){
         : `<button class="btn" onclick="closeDay()">🔒 마감 처리</button>`}
       <button class="btn danger" onclick="logout()">🚪 로그아웃</button>
     </div>
+  `;
+}
+
+function manualSection(title, bodyHtml){
+  return `
+    <div class="summary" style="margin-bottom:14px;">
+      <h2>${title}</h2>
+      ${bodyHtml}
+    </div>
+  `;
+}
+function renderManualView(){
+  return `
+    ${renderNav()}
+    ${manualSection('🔐 로그인', `
+      <p>아이디에 <b>본인 이름</b>을 입력하고, 관리자에게 받은 비밀번호를 입력합니다.<br>
+      관리자는 아이디 <b>admin</b> + 관리자 비밀번호로 로그인합니다.</p>
+    `)}
+    ${manualSection('🗓 상황판(맨 위 표) 사용법', `
+      <ul style="margin:0;padding-left:18px;line-height:1.8;">
+        <li><b>빈 칸(흰색) 클릭</b> — 그 시간에 새 예약을 만듭니다. 이름과 종료 시간을 입력하고 "예약 생성"을 누르면 됩니다.</li>
+        <li><b>빈 칸을 마우스로 눌러서 드래그</b> — 시작~종료 시간을 한 번에 선택할 수 있습니다. 예: 10시 칸부터 12시 칸까지 눌러서 끌면 종료 시간이 12:30(선택한 마지막 칸 다음)으로 자동 설정됩니다.</li>
+        <li><b>예약된 칸(색칠된 칸, 이름 표시됨) 클릭</b> — 상황판에서는 삭제되지 않고, 아래 해당 룸 탭으로 이동해서 그 방문 카드가 펼쳐집니다. 결제 입력이나 삭제는 거기서 합니다.</li>
+      </ul>
+    `)}
+    ${manualSection('✏️ 방문(예약) 카드 입력', `
+      <ul style="margin:0;padding-left:18px;line-height:1.8;">
+        <li>룸 탭(R1, R2 ...)을 선택한 뒤 <b>"+ 방문(예약) 추가"</b>를 누르면 새 카드가 생깁니다.</li>
+        <li>예약자 이름, 연락처(선택), 예약 시간을 입력합니다. 상황판과 자동으로 연결됩니다.</li>
+        <li><b>"+ 결제 추가"</b>로 결제 항목을 추가합니다: 항목 종류(게임비/홀인원응모(S)/기타), 결제수단(현금/카드/이체), 금액, 메모(예: 맥주, 8000x2) 순서로 입력합니다. 결제는 한 방문에 여러 건 추가할 수 있습니다.</li>
+        <li><b>버디 횟수</b>를 입력하면 지급액(1회당 100원)이 자동 계산됩니다.</li>
+        <li>카드 맨 위 요약 줄을 클릭하면 카드를 접었다 펼 수 있습니다.</li>
+        <li>다른 직원이 이미 입력한 방문을 수정하면 관리자 페이지의 변경 이력에 자동으로 기록됩니다.</li>
+      </ul>
+    `)}
+    ${manualSection('⛳ 연습장 매출', `
+      <p>일지 입력 화면 아래쪽 "연습장 매출" 항목에서 <b>"+ 연습장 매출 추가"</b>로 입력합니다. 결제수단과 금액을 선택하면 됩니다.</p>
+    `)}
+    ${manualSection('🔒 마감 처리', `
+      <p>그날 입력을 다 마쳤으면 <b>"마감 처리"</b>를 누릅니다. 마감 후에는 직원이 수정할 수 없고, 관리자만 수정하거나 "마감 취소"를 할 수 있습니다.</p>
+    `)}
+    ${isAdmin() ? manualSection('🛠 관리자 전용 기능', `
+      <ul style="margin:0;padding-left:18px;line-height:1.8;">
+        <li><b>📊 조회/통계</b> — 월별로 날짜별/룸별 매출 합계를 확인하고, 지난 일지를 편집하거나 삭제할 수 있습니다.</li>
+        <li><b>🛠 관리자 페이지</b> — 관리자 비밀번호 변경, 기간별 엑셀 출력(최대 1개월, 날짜별 탭으로 구분), 직원 계정 추가/비밀번호 재설정/삭제, 전체 변경 이력 확인이 가능합니다.</li>
+      </ul>
+    `) : ''}
   `;
 }
 
