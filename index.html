@@ -21,9 +21,6 @@
     --danger:#e0453d;
     --accent:#0066cc;
     --accent-focus:#0071e3;
-    --occupied-bg:#dce9ff;       /* 상황판: 룸별 무지개색 대신 단일 포인트 컬러(accent 계열)로 예약 칸을 표시 */
-    --occupied-bg-hover:#c9deff;
-    --occupied-text:#0b4a8f;
     --radius-pill:9999px;
     --radius-lg:18px;
     --radius-md:11px;
@@ -115,7 +112,6 @@
   .method-btn.transfer.active{background:var(--transfer-bg);border-color:var(--transfer);font-weight:bold;}
 
   .birdie-row{display:flex;gap:8px;align-items:center;font-size:12px;margin-top:4px;color:var(--ink-muted);}
-  .birdie-icon{flex-shrink:0;}
   .birdie-stepper{display:inline-flex;align-items:stretch;border:1px solid var(--line);border-radius:var(--radius-sm);overflow:hidden;background:#fff;}
   .birdie-stepper button{width:22px;border:none;background:#fff;cursor:pointer;font-size:13px;line-height:1;color:var(--ink);}
   .birdie-stepper button:hover:not(:disabled){background:var(--bg);}
@@ -169,22 +165,20 @@
   .board-card .board-wrap{border:none;border-radius:0;margin-bottom:0;}
   .board-wrap{overflow-x:auto;background:var(--card-white);border:1px solid var(--line);border-radius:var(--radius-lg);padding:12px;margin-bottom:14px;}
   .board-table{border-collapse:collapse;font-size:11px;user-select:none;}
-  .board-table th, .board-table td{border-bottom:1px solid var(--line);border-right:1px dashed #eee;padding:0;text-align:center;white-space:nowrap;}
-  .board-table th:last-child, .board-table td:last-child{border-right:none;}
+  .board-table th, .board-table td{border:1px solid var(--line);padding:0;text-align:center;white-space:nowrap;}
   .board-table th{background:var(--bg);padding:4px 3px;font-size:10px;font-weight:normal;color:var(--ink-muted);}
-  .board-table td.board-room-col{border-right:1px solid var(--line);}
   .board-room-col{position:sticky;left:0;background:var(--bg);z-index:2;padding:4px 10px !important;text-align:left;font-weight:bold;font-size:12px;}
   .board-cell{width:32px;height:38px;cursor:pointer;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:0 3px;}
   .board-cell.free{background:#fff;}
-  .board-cell.free:hover{background:#eef4ff;}
+  .board-cell.free:hover{background:#eef7e3;}
   .board-cell.free.selecting{background:var(--accent) !important;opacity:0.5;}
-  .board-cell.occupied{background:var(--occupied-bg);color:var(--occupied-text);font-weight:bold;}
-  .board-cell.occupied:hover{background:var(--occupied-bg-hover);}
+  .board-cell.occupied{color:#7a2050;font-weight:bold;}
+  .board-cell.occupied:hover{filter:brightness(0.93);}
   .board-legend{font-size:11px;color:var(--ink-muted);margin-top:8px;}
   .board-cell-demo{display:inline-block;width:12px;height:12px;border:1px solid var(--line);vertical-align:middle;margin:0 4px 0 10px;}
   .board-cell-demo:first-child{margin-left:0;}
   .board-cell-demo.free{background:#fff;}
-  .board-cell-demo.occupied{background:var(--occupied-bg);}
+  .board-cell-demo.occupied{background:var(--card-bg);}
 
   .modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;z-index:1000;}
   .modal-box{background:#fff;border-radius:var(--radius-lg);padding:20px;width:min(300px, 92vw);display:flex;flex-direction:column;gap:6px;}
@@ -275,7 +269,7 @@
 <body>
 <div id="header"></div>
 <div id="app"></div>
-<footer>모든 데이터는 클라우드(Firestore)에 자동 저장되어 어느 기기에서 접속해도 동일하게 보입니다.</footer>
+<footer>모든 데이터는 클라우드(Firestore)에 저장되어 어느 기기에서 접속해도 동일하게 보입니다. 룸별 카드의 수정 내용은 상단 "💾 저장" 버튼을 눌러야 반영됩니다.</footer>
 
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
@@ -293,6 +287,19 @@ let db; // set in init() after firebase.initializeApp()
 
 const ROOMS = ['R1','R2','R3','R5','R6','R7','R8','R9'];
 const ROOM_LABEL = {};
+// Per-room tint for the 상황판(board): a stronger shade for the room-name
+// cell, a light version to tint that row's empty slots so a row stays easy
+// to trace across many time columns.
+const ROOM_COLORS = {
+  R1: { label:'#f6c9c9', row:'#fdeeee' },
+  R2: { label:'#f7dcbb', row:'#fdf2e2' },
+  R3: { label:'#f0ecb0', row:'#faf8de' },
+  R5: { label:'#c0e6ae', row:'#e9f7e1' },
+  R6: { label:'#b3e4dc', row:'#e2f6f3' },
+  R7: { label:'#b7d2f2', row:'#e5eefc' },
+  R8: { label:'#cdc0ef', row:'#eee8fb' },
+  R9: { label:'#f0bfdd', row:'#fbe7f3' },
+};
 const WEEKDAYS = ['일','월','화','수','목','금','토'];
 const STORAGE_PREFIX = 'sgledger_';
 const METHODS = [
@@ -336,6 +343,7 @@ const DEFAULT_ADMIN_PASSWORD = 'daesung1!';
 const AUDIT_TYPE_LABEL = {
   STAFF_CHANGE: '담당자 변경(교대 인수인계)',
   CROSS_EDIT: '다른 직원이 작성한 내용 수정',
+  MANUAL_SAVE: '변경사항 저장',
   CLOSE: '마감 처리',
   ADMIN_EDIT_ON_CLOSED: '마감 후 수정/삭제(관리자)',
   REOPEN: '마감 취소(관리자)',
@@ -406,6 +414,7 @@ function subscribeLog(date){
   logUnsubscribe = db.collection('logs').doc(date).onSnapshot(snap=>{
     if(snap.metadata.hasPendingWrites) return; // this is our own optimistic write echoing back, not a remote change
     if(state.currentDate !== date || state.view !== 'edit') return; // listener outlived the view/date it was opened for
+    if(hasUnsavedChanges) return; // don't clobber a local draft the user hasn't saved yet
     const active = document.activeElement;
     if(active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) return; // don't clobber an in-progress edit or break IME composition
     state.log = snap.exists ? normalizeLog(snap.data()) : blankLog(date);
@@ -657,6 +666,7 @@ function persistAndRender(){
   syncStaffOwnership();
   saveLog(state.log);
   markSaved();
+  hasUnsavedChanges = false;
   render();
 }
 // Quiet save: used for free-text fields (Korean/IME input) where a full
@@ -668,6 +678,49 @@ function persistQuiet(){
   saveLog(state.log);
   markSaved();
 }
+// Room-card edits (visit info, payments, birdie count, booking time) no
+// longer autosave on every change — they only mutate state.log in memory
+// and mark it dirty; the 저장 button (saveLogChanges) is what actually
+// writes to Firestore. This also means subscribeLog's realtime listener
+// must never clobber an unsaved draft (see its hasUnsavedChanges check).
+let hasUnsavedChanges = false;
+function updateSaveButtonUI(){
+  const btn = document.getElementById('saveLogBtn');
+  if(!btn) return;
+  btn.disabled = !hasUnsavedChanges;
+  btn.classList.toggle('primary', hasUnsavedChanges);
+  btn.textContent = hasUnsavedChanges ? '💾 저장*' : '💾 저장';
+}
+function markDirty(){
+  hasUnsavedChanges = true;
+  render();
+}
+// Same as markDirty but skips the full render — used by free-text fields
+// (Korean/IME input) for the same reason persistQuiet does.
+function markDirtyQuiet(){
+  hasUnsavedChanges = true;
+  updateSaveButtonUI();
+}
+async function saveLogChanges(){
+  if(!state.log || !hasUnsavedChanges) return;
+  syncStaffOwnership();
+  const who = session ? (session.name + (isAdmin() ? ' (관리자)' : '')) : '(미상)';
+  addAudit(state.log.date, 'MANUAL_SAVE', `${who}님이 변경사항을 저장함`);
+  saveLog(state.log);
+  hasUnsavedChanges = false;
+  markSaved();
+  render();
+}
+// Guards any navigation away from the currently-open log (date change,
+// leaving to a different date via the list view, closing the tab) so an
+// unsaved draft is never silently discarded.
+function confirmDiscardIfDirty(){
+  if(!hasUnsavedChanges) return true;
+  return confirm('저장하지 않은 변경사항이 있습니다. 저장하지 않고 이동하면 변경사항이 사라집니다. 계속할까요?');
+}
+window.addEventListener('beforeunload', e=>{
+  if(hasUnsavedChanges){ e.preventDefault(); e.returnValue = ''; }
+});
 // Retry-on-failure safety net only — this used to blindly re-save the
 // in-memory log every minute regardless of whether anything failed, which
 // meant a tab left open on a date someone else was actively editing
@@ -682,6 +735,8 @@ setInterval(()=>{
 // ---------- mutation helpers ----------
 // (all mutations respect isLocked()/guardEdit() — see "day close / lock" section above)
 async function changeDate(v){
+  if(!confirmDiscardIfDirty()){ render(); return; } // render() resets the <input type=date> back to state.currentDate
+  hasUnsavedChanges = false;
   const myGen = ++loadGeneration;
   const prevDate = state.currentDate, prevLog = state.log;
   state.currentDate = v;
@@ -703,7 +758,7 @@ async function changeDate(v){
 function addVisit(room){
   if(!guardEdit()) return;
   state.log.rooms[room].push({ id:uid(), customer:'', phone:'', payments:[], birdieCount:0, createdBy: session?session.name:'' });
-  persistAndRender();
+  markDirty();
 }
 function removeVisit(room, visitId){
   if(!guardEdit()) return;
@@ -711,7 +766,7 @@ function removeVisit(room, visitId){
   const v = getVisit(room, visitId);
   noteCrossStaffEdit(room, v, '방문 전체 삭제');
   state.log.rooms[room] = state.log.rooms[room].filter(v=>v.id!==visitId);
-  persistAndRender();
+  markDirty();
 }
 function getVisit(room, visitId){
   return state.log.rooms[room].find(v=>v.id===visitId);
@@ -789,7 +844,7 @@ function submitBooking(){
   if(conflict){ alert('선택한 시간대에 이미 다른 예약이 있습니다. 시간을 다시 선택해주세요.'); return; }
   visits.push({ id:uid(), customer:name, phone, payments:[], birdieCount:0, bookingStart:start, bookingEnd:end, createdBy: session?session.name:'' });
   bookingDialog = null;
-  persistAndRender();
+  markDirty();
 }
 // Edits an existing visit's booking range directly from the room panel (not
 // just via the board's create dialog), keeping both views in sync. Rejects
@@ -802,7 +857,7 @@ function setBookingRange(room, visitId, field, value){
     delete v.bookingStart;
     delete v.bookingEnd;
     noteCrossStaffEdit(room, v, `예약 시간 해제 (${oldRange} → 미지정)`);
-    persistAndRender();
+    markDirty();
     return;
   }
   let newStart = field==='start' ? value : v.bookingStart;
@@ -821,7 +876,7 @@ function setBookingRange(room, visitId, field, value){
   v.bookingStart = newStart;
   v.bookingEnd = newEnd;
   noteCrossStaffEdit(room, v, `예약 시간 변경 (${oldRange} → ${newStart}~${newEnd})`);
-  persistAndRender();
+  markDirty();
 }
 // Clicking a booked slot on the board jumps to that visit's card in the room
 // panel below and expands only it — every other card in that room folds, so
@@ -839,43 +894,39 @@ function focusVisitFromBoard(room, visitId){
 }
 function setCustomer(room, visitId, v){
   if(isBlockedForEdit()) return;
-  getVisit(room, visitId).customer = v; persistQuiet();
+  getVisit(room, visitId).customer = v; markDirtyQuiet();
 }
 function setPhone(room, visitId, v){
   if(isBlockedForEdit()) return;
-  getVisit(room, visitId).phone = v; persistQuiet();
+  getVisit(room, visitId).phone = v; markDirtyQuiet();
 }
 function addPayment(room, visitId){
   if(!guardEdit()) return;
   const v = getVisit(room, visitId);
   v.payments.push({ id:uid(), type:'GAME', method:'cash', amount:0, memo:'' });
   noteCrossStaffEdit(room, v, '결제 항목 추가');
-  persistAndRender();
+  markDirty();
 }
 const FIELD_LABEL = { amount:'금액', method:'결제수단', type:'항목 종류' };
+// No confirm-before-overwrite prompt here — the 저장 button is now the
+// actual commit point, so an in-progress edit is cheap to correct before
+// saving. noteCrossStaffEdit still records what changed for later review.
 function updatePayment(room, visitId, payId, field, value){
   if(!guardEdit()) return;
   const v = getVisit(room, visitId);
   const p = v.payments.find(p=>p.id===payId);
   const newVal = field==='amount' ? (Number(value)||0) : value;
-  const hadValue = (Number(p.amount)||0) !== 0; // this payment line already holds a recorded amount
   const changed = p[field] !== newVal;
-  if(hadValue && changed){
-    if(!confirm(`이미 입력된 ${FIELD_LABEL[field]}을(를) 수정하시겠습니까?`)){
-      render(); // reset any premature UI change (e.g. a <select>) back to the real state
-      return;
-    }
-  }
   const oldVal = p[field];
   p[field] = newVal;
   if(changed) noteCrossStaffEdit(room, v, `결제 ${FIELD_LABEL[field]} 수정 (${oldVal===''||oldVal==null?'-':oldVal} → ${newVal})`);
-  persistAndRender();
+  markDirty();
 }
 function updatePaymentQuiet(room, visitId, payId, field, value){
   if(isBlockedForEdit()) return;
   const p = getVisit(room, visitId).payments.find(p=>p.id===payId);
   p[field] = value;
-  persistQuiet();
+  markDirtyQuiet();
 }
 function removePayment(room, visitId, payId){
   if(!guardEdit()) return;
@@ -883,22 +934,16 @@ function removePayment(room, visitId, payId){
   const v = getVisit(room, visitId);
   v.payments = v.payments.filter(p=>p.id!==payId);
   noteCrossStaffEdit(room, v, '결제 내역 삭제');
-  persistAndRender();
+  markDirty();
 }
 function setBirdie(room, visitId, v){
   if(!guardEdit()) return;
   const visit = getVisit(room, visitId);
   const newVal = Number(v)||0;
   const oldVal = visit.birdieCount||0;
-  if(oldVal !== 0 && oldVal !== newVal){
-    if(!confirm(`이미 입력된 버디 횟수를 ${newVal}회로 수정하시겠습니까?`)){
-      render();
-      return;
-    }
-  }
   visit.birdieCount = newVal;
   if(oldVal !== newVal) noteCrossStaffEdit(room, visit, `버디 횟수 변경 (${oldVal}회 → ${newVal}회)`);
-  persistAndRender();
+  markDirty();
 }
 function addPractice(){
   if(!guardEdit()) return;
@@ -1128,7 +1173,8 @@ function renderManualView(){
         <li><b>"+ 결제 추가"</b>로 결제 항목을 추가합니다: 항목 종류(게임비/홀인원응모(S)/기타), 결제수단(현금/카드/이체), 금액, 메모(예: 맥주, 8000x2) 순서로 입력합니다. 결제는 한 방문에 여러 건 추가할 수 있습니다.</li>
         <li><b>버디 횟수</b>를 입력하면 지급액(1회당 100원)이 자동 계산됩니다.</li>
         <li>카드 맨 위 요약 줄을 클릭하면 카드를 접었다 펼 수 있습니다.</li>
-        <li>다른 직원이 이미 입력한 방문을 수정하면 관리자 페이지의 변경 이력에 자동으로 기록됩니다.</li>
+        <li>수정한 내용은 바로 저장되지 않습니다. 상단의 <b>"💾 저장"</b> 버튼을 눌러야 실제로 반영됩니다(버튼이 파란색으로 바뀌면 저장할 내용이 있다는 뜻입니다).</li>
+        <li>다른 직원이 이미 입력한 방문을 수정하면 관리자 페이지의 변경 이력에 자동으로 기록되고, 저장 버튼을 누를 때마다 누가 저장했는지도 함께 기록됩니다.</li>
       </ul>
     `)}
     ${manualSection('⛳ 연습장 매출', `
@@ -1154,7 +1200,8 @@ function renderBoard(){
         <tr><th class="board-room-col">룸</th>${BOARD_SLOTS.map(s=>`<th>${s.endsWith(':00')?s:''}</th>`).join('')}</tr>
         ${ROOMS.map(room=>{
           const visits = state.log.rooms[room] || [];
-          return `<tr><td class="board-room-col">${ROOM_LABEL[room]||room}</td>${renderBoardRow(room, visits)}</tr>`;
+          const c = ROOM_COLORS[room] || { label:'#f0f0f0', row:'#fff' };
+          return `<tr><td class="board-room-col">${ROOM_LABEL[room]||room}</td>${renderBoardRow(room, visits, c.label)}</tr>`;
         }).join('')}
       </table>
       <div class="board-legend"><span class="board-cell-demo free"></span>예약 가능<span class="board-cell-demo occupied"></span>예약됨</div>
@@ -1166,7 +1213,7 @@ function renderBoard(){
 // belong to the same booking into one wide cell (colspan) so the
 // reservation's name is shown once across its full occupied span, not
 // truncated per-slot.
-function renderBoardRow(room, visits){
+function renderBoardRow(room, visits, occupiedColor){
   let html = '';
   let i = 0;
   while(i < BOARD_SLOTS.length){
@@ -1175,11 +1222,11 @@ function renderBoardRow(room, visits){
     if(owner && slot === owner.bookingStart){
       const span = Math.max(1, Math.round((toMinutes(owner.bookingEnd) - toMinutes(owner.bookingStart)) / 30));
       const tip = `${owner.customer||''}${owner.phone?' ☎'+owner.phone:''} (${owner.bookingStart}~${owner.bookingEnd})`;
-      html += `<td class="board-cell occupied" colspan="${span}" title="${escAttr(tip)}" onclick="focusVisitFromBoard('${room}','${owner.id}')">${escHtml(owner.customer||'')}</td>`;
+      html += `<td class="board-cell occupied" colspan="${span}" style="background:${occupiedColor};" title="${escAttr(tip)}" onclick="focusVisitFromBoard('${room}','${owner.id}')">${escHtml(owner.customer||'')}</td>`;
       i += span;
     } else if(owner){
       // Defensive fallback for pre-existing overlapping data; normal use never reaches this.
-      html += `<td class="board-cell occupied" title="${escAttr(owner.customer||'')}" onclick="focusVisitFromBoard('${room}','${owner.id}')"></td>`;
+      html += `<td class="board-cell occupied" style="background:${occupiedColor};" title="${escAttr(owner.customer||'')}" onclick="focusVisitFromBoard('${room}','${owner.id}')"></td>`;
       i += 1;
     } else {
       html += `<td class="board-cell free" data-room="${room}" data-slot="${slot}" title="${slot} 예약하기(드래그로 시간대 선택 가능)" onmousedown="event.preventDefault();startBoardDrag('${room}','${slot}')" onmouseenter="extendBoardDrag('${room}','${slot}')"></td>`;
@@ -1228,6 +1275,7 @@ function renderEditView(){
         <span class="method-tag desktop-only-info" style="background:#eef2ff;color:var(--accent);">담당자: ${escHtml(log.staff || session.name)}</span>
         <div class="spacer"></div>
         <span class="autosave-badge desktop-only-info" id="lastSavedBadge">${lastSavedAt ? '✔ 마지막 저장 ' + lastSavedAt.toLocaleTimeString('ko-KR') : '자동 저장 대기중'}</span>
+        <button class="btn ${hasUnsavedChanges?'primary':''}" id="saveLogBtn" ${hasUnsavedChanges?'':'disabled'} onclick="saveLogChanges()">💾 저장${hasUnsavedChanges?'*':''}</button>
         ${log.closed
           ? `<span class="method-tag transfer mobile-only-close">🔒 마감됨</span>${isAdmin() ? `<button class="btn small mobile-only-close" onclick="reopenDay()">🔓 마감 취소</button>` : ''}`
           : `<button class="btn mobile-only-close" onclick="closeDay()">🔒 마감 처리</button>`}
@@ -1315,8 +1363,7 @@ function renderVisitCard(room, v){
       <button class="btn small" ${locked?'disabled':''} onclick="addPayment('${room}','${v.id}')">+ 결제 추가</button>
 
       <div class="birdie-row">
-        <svg class="birdie-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 14c3-6 7-6 10 0 3-6 7-6 10 0"/></svg>
-        버디 횟수:
+        🐦 버디 횟수:
         <div class="birdie-stepper">
           <button type="button" ${locked?'disabled':''} ${(v.birdieCount||0)<=0?'disabled':''} onclick="setBirdie('${room}','${v.id}', ${Math.max(0,(v.birdieCount||0)-1)})">−</button>
           <input type="number" min="0" value="${v.birdieCount||0}" ${locked?'disabled':''} onchange="setBirdie('${room}','${v.id}',this.value)">
@@ -1482,6 +1529,8 @@ function renderListView(){
 }
 
 async function loadDateIntoEditor(date){
+  if(!confirmDiscardIfDirty()) return;
+  hasUnsavedChanges = false;
   const myGen = ++loadGeneration;
   state.currentDate = date;
   state.log = null;
