@@ -89,11 +89,20 @@
   .visit-head input.customer, .visit-head input.phone{flex:1 0 100%;min-width:0;}
 
   .payments{display:flex;flex-direction:column;gap:6px;margin:8px 0;}
-  .pay-row{display:flex;gap:6px;align-items:center;flex-wrap:wrap;}
-  .pay-row select, .pay-row input{padding:5px 6px;border:1px solid var(--line);border-radius:var(--radius-sm);font-size:12px;}
-  .pay-row input.amount{flex:0 1 100px;min-width:70px;text-align:right;}
-  .pay-row input.memo{flex:1 1 165px;min-width:120px;}
-  .pay-row .x{margin-left:auto;padding:0 4px;}
+  .pay-row{display:grid;grid-template-columns:130px 1fr;gap:6px 8px;align-items:center;}
+  .pay-row select, .pay-row input{box-sizing:border-box;width:100%;height:30px;padding:0 8px;border:1px solid var(--line);border-radius:var(--radius-sm);font-size:12px;}
+  .pay-row select{
+    -webkit-appearance:none;appearance:none;grid-column:1;grid-row:1;padding-right:22px;
+    background-image:linear-gradient(45deg,transparent 50%,var(--ink-muted) 50%),linear-gradient(135deg,var(--ink-muted) 50%,transparent 50%);
+    background-position:calc(100% - 13px) 55%,calc(100% - 8px) 55%;background-size:5px 5px,5px 5px;background-repeat:no-repeat;
+  }
+  .pay-row input[type=number]{-webkit-appearance:none;appearance:none;-moz-appearance:textfield;}
+  .pay-row input[type=number]::-webkit-outer-spin-button, .pay-row input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0;}
+  .pay-row .method-btns{grid-column:2;grid-row:1;}
+  .pay-row .amount-wrap{grid-column:1;grid-row:2;display:flex;align-items:center;gap:4px;}
+  .pay-row .amount-wrap input.amount{width:auto;flex:1 1 0%;min-width:0;text-align:right;}
+  .pay-row input.memo{grid-column:2;grid-row:2;}
+  .pay-row .x{grid-column:2;grid-row:3;justify-self:end;padding:0 4px;cursor:pointer;color:#888;}
   .method-btns{display:flex;gap:3px;}
   .method-btn{
     padding:5px 10px;border-radius:var(--radius-pill);border:1px solid var(--line);cursor:pointer;font-size:11px;background:#fff;color:var(--ink);
@@ -1290,9 +1299,11 @@ function renderPaymentRow(room, visitId, p){
       <div class="method-btns">
         ${METHODS.map(m=>`<div class="method-btn ${m.key} ${p.method===m.key?'active':''}" onclick="updatePayment('${room}','${visitId}','${p.id}','method','${m.key}')">${m.label}</div>`).join('')}
       </div>
-      <input class="amount" type="number" min="0" step="100" value="${p.amount}" ${locked?'disabled':''} onchange="updatePayment('${room}','${visitId}','${p.id}','amount',this.value)"> 원
+      <span class="amount-wrap">
+        <input class="amount" type="number" min="0" step="100" value="${p.amount}" ${locked?'disabled':''} onchange="updatePayment('${room}','${visitId}','${p.id}','amount',this.value)"> 원
+      </span>
       <input class="memo" type="text" placeholder="메모(예: 맥주, 8000x2)" value="${escAttr(p.memo||'')}" ${locked?'disabled':''} oninput="updatePaymentQuiet('${room}','${visitId}','${p.id}','memo',this.value)">
-      <span class="x" style="cursor:pointer;color:#888;" onclick="removePayment('${room}','${visitId}','${p.id}')">✕</span>
+      <span class="x" onclick="removePayment('${room}','${visitId}','${p.id}')">✕</span>
     </div>
   `;
 }
