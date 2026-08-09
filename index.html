@@ -42,7 +42,7 @@
   .spacer{flex:1;}
   .btn{
     padding:7px 14px;border-radius:7px;border:1px solid var(--line);
-    background:#fff;cursor:pointer;font-size:13px;
+    background:#fff;cursor:pointer;font-size:13px;white-space:nowrap;
   }
   .btn:hover{background:#f0f0f0;}
   .btn.primary{background:var(--accent);color:#fff;border-color:var(--accent);}
@@ -68,14 +68,15 @@
   }
   .visit-head{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px;}
   .visit-head input[type=text]{padding:5px 8px;border:1px solid var(--line);border-radius:6px;font-size:13px;}
-  .visit-head input.customer{width:140px;}
-  .visit-head input.phone{width:130px;}
+  .visit-head input.customer{flex:1 1 140px;min-width:110px;}
+  .visit-head input.phone{flex:1 1 130px;min-width:110px;}
 
   .payments{display:flex;flex-direction:column;gap:6px;margin:8px 0;}
   .pay-row{display:flex;gap:6px;align-items:center;flex-wrap:wrap;}
   .pay-row select, .pay-row input{padding:5px 6px;border:1px solid var(--line);border-radius:6px;font-size:12px;}
-  .pay-row input.amount{width:100px;text-align:right;}
-  .pay-row input.memo{width:165px;}
+  .pay-row input.amount{flex:0 1 100px;min-width:70px;text-align:right;}
+  .pay-row input.memo{flex:1 1 165px;min-width:120px;}
+  .pay-row .x{margin-left:auto;padding:0 4px;}
   .method-btns{display:flex;gap:3px;}
   .method-btn{
     padding:5px 9px;border-radius:6px;border:1px solid var(--line);cursor:pointer;font-size:11px;background:#fff;
@@ -98,14 +99,14 @@
 
   .practice-section{background:var(--card-white);border:1px solid var(--line);border-radius:8px;padding:14px;margin-bottom:18px;}
   .practice-row{display:flex;gap:8px;align-items:center;margin-bottom:6px;flex-wrap:wrap;}
-  .practice-row input.amount{width:100px;padding:5px 6px;border:1px solid var(--line);border-radius:6px;text-align:right;}
+  .practice-row input.amount{flex:0 1 100px;min-width:70px;padding:5px 6px;border:1px solid var(--line);border-radius:6px;text-align:right;}
   .warn{color:#c9750c;font-size:11px;}
 
-  .summary{background:var(--card-white);border:1px solid var(--line);border-radius:8px;padding:16px;}
+  .summary{background:var(--card-white);border:1px solid var(--line);border-radius:8px;padding:16px;overflow-x:auto;}
   .summary h2{font-size:16px;margin:0 0 10px;}
   table{border-collapse:collapse;width:100%;font-size:13px;}
   table th, table td{border:1px solid var(--line);padding:6px 8px;text-align:right;}
-  table th{background:#f0f0f0;}
+  table th{background:#f0f0f0;white-space:nowrap;}
   table td.label, table th.label{text-align:left;}
   .grand-row td{font-weight:bold;background:#f7f9ff;}
   .method-tag{padding:2px 6px;border-radius:5px;font-size:11px;}
@@ -140,13 +141,21 @@
   .board-cell-demo.occupied{background:var(--card-bg);}
 
   .modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;z-index:1000;}
-  .modal-box{background:#fff;border-radius:10px;padding:20px;width:300px;display:flex;flex-direction:column;gap:6px;}
+  .modal-box{background:#fff;border-radius:10px;padding:20px;width:min(300px, 92vw);display:flex;flex-direction:column;gap:6px;}
   .modal-box label{font-size:13px;color:#555;margin-top:8px;}
   .modal-box input, .modal-box select{padding:7px 8px;border:1px solid var(--line);border-radius:6px;font-size:14px;}
   .list-table-wrap{background:var(--card-white);border:1px solid var(--line);border-radius:8px;padding:14px;margin-bottom:14px;overflow-x:auto;}
   select.month-select{padding:6px 8px;border:1px solid var(--line);border-radius:6px;}
   .row-actions{display:flex;gap:4px;}
   footer{text-align:center;color:#999;font-size:11px;margin-top:20px;}
+
+  @media (max-width: 480px){
+    body{padding:10px;}
+    h1{font-size:17px;}
+    .btn{padding:6px 10px;font-size:12.5px;}
+    table{font-size:12px;}
+    table th, table td{padding:5px 6px;}
+  }
 </style>
 </head>
 <body>
@@ -487,6 +496,14 @@ let state = {
   listData: null, // { dates, logsByDate } — prefetched when entering list view
   adminData: null, // { staffList, audit } — prefetched when entering admin view
 };
+// Bumped at the start of every async view/date load below; a load only
+// applies its result if this counter hasn't moved on since it started. This
+// stops a slow, older request from resolving after a newer one and snapping
+// the screen (and Firestore, via the next save) back to stale data — the
+// root cause behind settings occasionally "reverting" when switching dates
+// or views quickly (e.g. typing into the date field fires multiple change
+// events before you've finished).
+let loadGeneration = 0;
 let collapsedVisits = new Set(); // UI-only: which visit cards are folded (not persisted)
 let bookingDialog = null; // { room, start } while the board's "new booking" modal is open
 
@@ -541,13 +558,17 @@ setInterval(()=>{
 // ---------- mutation helpers ----------
 // (all mutations respect isLocked()/guardEdit() — see "day close / lock" section above)
 async function changeDate(v){
+  const myGen = ++loadGeneration;
   const prevDate = state.currentDate, prevLog = state.log;
   state.currentDate = v;
   state.log = null;
   render();
   try{
-    state.log = await loadLog(v);
+    const log = await loadLog(v);
+    if(myGen !== loadGeneration) return; // superseded by a newer date/view change — don't clobber it
+    state.log = log;
   }catch(e){
+    if(myGen !== loadGeneration) return;
     alert('일지를 불러오지 못했습니다. 인터넷 연결을 확인하고 다시 시도해주세요.');
     state.currentDate = prevDate;
     state.log = prevLog; // never leave the screen on a blank stand-in that could get saved over the real data
@@ -828,28 +849,34 @@ function render(){
   else if(state.view==='manual') app.innerHTML = renderManualView();
 }
 async function openListView(){
+  const myGen = ++loadGeneration;
   state.view = 'list';
   state.listData = null;
   render();
   try{
     const snap = await db.collection('logs').get();
+    if(myGen !== loadGeneration) return;
     const logsByDate = {};
     snap.forEach(doc => logsByDate[doc.id] = normalizeLog(doc.data()));
     state.listData = { dates: Object.keys(logsByDate).filter(d=>/^\d{4}-\d{2}-\d{2}$/.test(d)).sort(), logsByDate };
   }catch(e){
+    if(myGen !== loadGeneration) return;
     alert('조회/통계 데이터를 불러오지 못했습니다. 인터넷 연결을 확인하고 다시 시도해주세요.');
     state.view = 'edit';
   }
   render();
 }
 async function openAdminView(){
+  const myGen = ++loadGeneration;
   state.view = 'admin';
   state.adminData = null;
   render();
   try{
     const [staffList, audit] = await Promise.all([getStaffList(), getAudit()]);
+    if(myGen !== loadGeneration) return;
     state.adminData = { staffList, audit };
   }catch(e){
+    if(myGen !== loadGeneration) return;
     alert('관리자 페이지 데이터를 불러오지 못했습니다. 인터넷 연결을 확인하고 다시 시도해주세요.');
     state.view = 'edit';
   }
@@ -1297,13 +1324,17 @@ function renderListView(){
 }
 
 async function loadDateIntoEditor(date){
+  const myGen = ++loadGeneration;
   state.currentDate = date;
   state.log = null;
   state.view = 'edit';
   render();
   try{
-    state.log = await loadLog(date); // fresh read, not the list-view snapshot — another device may have changed it since
+    const log = await loadLog(date); // fresh read, not the list-view snapshot — another device may have changed it since
+    if(myGen !== loadGeneration) return;
+    state.log = log;
   }catch(e){
+    if(myGen !== loadGeneration) return;
     alert('일지를 불러오지 못했습니다. 인터넷 연결을 확인하고 다시 시도해주세요.');
     state.view = 'list'; // back to a view that still has state.listData, rather than stranding on a blank editor
   }
