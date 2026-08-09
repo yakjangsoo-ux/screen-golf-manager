@@ -127,6 +127,7 @@
   .visit-summary-bar:hover{background:var(--bg);}
   .collapse-arrow{color:var(--ink-muted);font-size:11px;width:12px;}
   .visit-summary-meta{color:var(--ink-muted);font-size:12px;}
+  .unsaved-dot{color:var(--accent);font-size:11px;font-weight:600;white-space:nowrap;margin-left:auto;}
 
   .add-visit-btn{width:100%;padding:10px;border:2px dashed var(--line);background:transparent;border-radius:var(--radius-lg);cursor:pointer;color:var(--ink-muted);font-size:13px;}
   .add-visit-btn:hover{background:var(--bg);}
@@ -269,7 +270,7 @@
 <body>
 <div id="header"></div>
 <div id="app"></div>
-<footer>모든 데이터는 클라우드(Firestore)에 저장되어 어느 기기에서 접속해도 동일하게 보입니다. 룸별 카드의 수정 내용은 상단 "💾 저장" 버튼을 눌러야 반영됩니다.</footer>
+<footer>모든 데이터는 클라우드(Firestore)에 저장되어 어느 기기에서 접속해도 동일하게 보입니다. 예약 카드의 수정 내용은 카드 안의 "💾 저장" 버튼을 눌러야 반영됩니다.</footer>
 
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
@@ -395,32 +396,97 @@ async function loadLog(date){
   const snap = await db.collection('logs').doc(date).get();
   return snap.exists ? normalizeLog(snap.data()) : blankLog(date);
 }
-function saveLog(log){
-  // Fire-and-forget: state.log in memory is already the source of truth for
-  // this session, so callers don't need to wait on the write to finish. A
-  // failure is surfaced via the "마지막 저장" badge (see markSaveFailed) so
-  // staff notice instead of unknowingly working on data that never made it
-  // to the server.
-  db.collection('logs').doc(log.date).set(log).catch(err=>{ console.warn('일지 저장 실패:', err); markSaveFailed(); });
+function deepCopy(o){ return JSON.parse(JSON.stringify(o)); }
+// The server state this session last synced from / wrote to. Used as the
+// common ancestor for the 3-way merge in commitLog() so a save can tell
+// "this visit was deleted by me" apart from "this visit was added by
+// someone else after I loaded".
+let baseLog = null;
+function setBase(log){ baseLog = deepCopy(log); }
+
+// Merges the local draft onto whatever the server currently holds, instead
+// of blindly overwriting the whole document. Per-visit (and per-practice-row)
+// last-writer-wins, EXCEPT that rows another device created after we last
+// synced are preserved rather than erased — a plain .set(state.log) wiped
+// them, which is what kept making saved info disappear.
+function mergeForSave(serverLog, localLog, base){
+  const merged = deepCopy(localLog);
+  if(!serverLog) return merged;
+  const baseRooms = (base && base.rooms) || {};
+  const serverRooms = serverLog.rooms || {};
+  ROOMS.forEach(r=>{
+    const localList = merged.rooms[r] || (merged.rooms[r] = []);
+    const localIds = new Set(localList.map(v=>v.id));
+    const baseIds = new Set((baseRooms[r] || []).map(v=>v.id));
+    (serverRooms[r] || []).forEach(sv=>{
+      // Unknown to both our draft and our sync base => created elsewhere
+      // after we loaded. Keep it; deleting it would be data loss.
+      if(!localIds.has(sv.id) && !baseIds.has(sv.id)) localList.push(sv);
+    });
+  });
+  const localP = merged.practice || (merged.practice = []);
+  const localPIds = new Set(localP.map(p=>p.id));
+  const basePIds = new Set(((base && base.practice) || []).map(p=>p.id));
+  (serverLog.practice || []).forEach(sp=>{
+    if(!localPIds.has(sp.id) && !basePIds.has(sp.id)) localP.push(sp);
+  });
+  return merged;
+}
+// Single commit path for every write. Runs in a transaction so the merge
+// sees the document as it is at write time, not a stale cached copy.
+async function commitLog(){
+  const date = state.log.date;
+  const ref = db.collection('logs').doc(date);
+  try{
+    const merged = await db.runTransaction(async tx=>{
+      const snap = await tx.get(ref);
+      const m = mergeForSave(snap.exists ? snap.data() : null, state.log, baseLog);
+      tx.set(ref, m);
+      return m;
+    });
+    if(state.log.date === date) state.log = normalizeLog(merged);
+    setBase(merged);
+    markSaved();
+    return true;
+  }catch(err){
+    console.warn('일지 저장 실패:', err);
+    markSaveFailed();
+    return false;
+  }
 }
 let logUnsubscribe = null;
-// Keeps state.log live-synced with Firestore for whichever date is open, so
-// a second tab/device/staff member editing the same date doesn't get
-// silently overwritten by this tab's next save (the previous design only
-// read a date once and then blindly re-saved its in-memory copy every
-// minute — the actual cause behind "내가 추가한 게 갑자기 사라진다").
+// Latest server state we received but could not safely apply yet (user was
+// mid-edit, on another view, or holding an unsaved draft). Buffering it is
+// the whole point: the previous version simply dropped such updates, and
+// since onSnapshot only re-fires when the document CHANGES again, state.log
+// stayed stale indefinitely — then the next save pushed that stale copy over
+// the server. That stale-overwrite loop is what made saved info flicker in
+// and then vanish.
+let pendingRemoteLog = null;
+function applyPendingRemote(){
+  if(!pendingRemoteLog) return;
+  if(state.currentDate !== pendingRemoteLog.date){ pendingRemoteLog = null; return; }
+  if(hasUnsavedChanges()) return;                     // keep the user's unsaved draft
+  const active = document.activeElement;
+  if(active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) return; // would break IME composition
+  const incoming = pendingRemoteLog;
+  pendingRemoteLog = null;
+  state.log = incoming;
+  setBase(incoming);
+  if(state.view === 'edit') render();
+}
 function subscribeLog(date){
   if(logUnsubscribe){ logUnsubscribe(); logUnsubscribe = null; }
+  pendingRemoteLog = null;
   logUnsubscribe = db.collection('logs').doc(date).onSnapshot(snap=>{
-    if(snap.metadata.hasPendingWrites) return; // this is our own optimistic write echoing back, not a remote change
-    if(state.currentDate !== date || state.view !== 'edit') return; // listener outlived the view/date it was opened for
-    if(hasUnsavedChanges) return; // don't clobber a local draft the user hasn't saved yet
-    const active = document.activeElement;
-    if(active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) return; // don't clobber an in-progress edit or break IME composition
-    state.log = snap.exists ? normalizeLog(snap.data()) : blankLog(date);
-    render();
+    if(snap.metadata.hasPendingWrites) return; // our own write echoing back; state.log already has it
+    if(state.currentDate !== date) return;     // listener outlived the date it was opened for
+    pendingRemoteLog = snap.exists ? normalizeLog(snap.data()) : blankLog(date);
+    applyPendingRemote();
   }, err=>{ console.warn('실시간 동기화 실패:', err); });
 }
+// Once the user leaves a field, any update we deferred above becomes safe.
+document.addEventListener('focusout', ()=>setTimeout(applyPendingRemote, 0));
 function deleteLogDate(date){
   return db.collection('logs').doc(date).delete();
 }
@@ -662,81 +728,68 @@ function syncStaffOwnership(){
     state.log.staff = session.name;
   }
 }
-function persistAndRender(){
+// Structural changes (adding/removing a visit, creating a booking, 연습장
+// 매출, 마감) commit straight away: they're already deliberate, confirmed
+// actions, and saving them immediately means a room can never end up with
+// pending edits but no visit card left to host a 저장 button.
+async function persistAndRender(){
   syncStaffOwnership();
-  saveLog(state.log);
-  markSaved();
-  hasUnsavedChanges = false;
-  render();
+  render();              // show the change immediately, don't wait on the round-trip
+  await commitLog();
+  render();              // re-render on the merged result the server actually holds
 }
-// Quiet save: used for free-text fields (Korean/IME input) where a full
-// re-render per keystroke would destroy the input node and break IME
-// composition. These fields don't affect any computed totals, so it's
-// safe to persist without redrawing the DOM.
-function persistQuiet(){
-  syncStaffOwnership();
-  saveLog(state.log);
-  markSaved();
-}
-// Room-card edits (visit info, payments, birdie count, booking time) no
-// longer autosave on every change — they only mutate state.log in memory
-// and mark it dirty; the 저장 button (saveLogChanges) is what actually
-// writes to Firestore. This also means subscribeLog's realtime listener
-// must never clobber an unsaved draft (see its hasUnsavedChanges check).
-let hasUnsavedChanges = false;
-function updateSaveButtonUI(){
-  const btn = document.getElementById('saveLogBtn');
-  if(!btn) return;
-  btn.disabled = !hasUnsavedChanges;
-  btn.classList.toggle('primary', hasUnsavedChanges);
-  btn.textContent = hasUnsavedChanges ? '💾 저장*' : '💾 저장';
-}
-function markDirty(){
-  hasUnsavedChanges = true;
+// Which visits hold edits that haven't been committed yet. Per-visit rather
+// than one global flag so each room card's 저장 button can show whether that
+// particular card has something to save.
+const dirtyVisits = new Set();
+function hasUnsavedChanges(){ return dirtyVisits.size > 0; }
+function markDirty(visitId){
+  if(visitId) dirtyVisits.add(visitId);
   render();
 }
 // Same as markDirty but skips the full render — used by free-text fields
-// (Korean/IME input) for the same reason persistQuiet does.
-function markDirtyQuiet(){
-  hasUnsavedChanges = true;
-  updateSaveButtonUI();
+// (Korean/IME input) where re-rendering per keystroke would destroy the
+// input node and break IME composition.
+function markDirtyQuiet(visitId){
+  if(visitId) dirtyVisits.add(visitId);
+  const btn = document.getElementById('saveBtn-' + visitId);
+  if(btn){ btn.disabled = false; btn.classList.add('primary'); }
 }
 async function saveLogChanges(){
-  if(!state.log || !hasUnsavedChanges) return;
+  if(!state.log || dirtyVisits.size === 0) return;
   syncStaffOwnership();
   const who = session ? (session.name + (isAdmin() ? ' (관리자)' : '')) : '(미상)';
+  const ok = await commitLog();
+  if(!ok){
+    alert('저장하지 못했습니다. 인터넷 연결을 확인한 뒤 다시 저장해주세요.');
+    return; // keep the draft (and its dirty markers) so the user can retry
+  }
   addAudit(state.log.date, 'MANUAL_SAVE', `${who}님이 변경사항을 저장함`);
-  saveLog(state.log);
-  hasUnsavedChanges = false;
-  markSaved();
+  dirtyVisits.clear();
+  applyPendingRemote(); // pull in anything that arrived while we were dirty
   render();
 }
 // Guards any navigation away from the currently-open log (date change,
 // leaving to a different date via the list view, closing the tab) so an
 // unsaved draft is never silently discarded.
 function confirmDiscardIfDirty(){
-  if(!hasUnsavedChanges) return true;
+  if(dirtyVisits.size === 0) return true;
   return confirm('저장하지 않은 변경사항이 있습니다. 저장하지 않고 이동하면 변경사항이 사라집니다. 계속할까요?');
 }
 window.addEventListener('beforeunload', e=>{
-  if(hasUnsavedChanges){ e.preventDefault(); e.returnValue = ''; }
+  if(dirtyVisits.size > 0){ e.preventDefault(); e.returnValue = ''; }
 });
-// Retry-on-failure safety net only — this used to blindly re-save the
-// in-memory log every minute regardless of whether anything failed, which
-// meant a tab left open on a date someone else was actively editing
-// elsewhere would periodically stomp their changes with its own stale copy
-// (the actual cause behind "내가 추가한 게 갑자기 사라진다"). subscribeLog's
-// realtime listener now keeps state.log fresh instead, so this only needs
-// to retry a save that's actually known to have failed.
+// Retry-on-failure safety net only — never a blind periodic re-save, which
+// is how a tab left open on a stale copy used to stomp other devices' work.
 setInterval(()=>{
-  if(state.log && lastSaveFailed) saveLog(state.log);
+  if(state.log && lastSaveFailed) commitLog();
 }, 60000);
 
 // ---------- mutation helpers ----------
 // (all mutations respect isLocked()/guardEdit() — see "day close / lock" section above)
 async function changeDate(v){
   if(!confirmDiscardIfDirty()){ render(); return; } // render() resets the <input type=date> back to state.currentDate
-  hasUnsavedChanges = false;
+  dirtyVisits.clear();
   const myGen = ++loadGeneration;
   const prevDate = state.currentDate, prevLog = state.log;
   state.currentDate = v;
@@ -746,6 +799,7 @@ async function changeDate(v){
     const log = await loadLog(v);
     if(myGen !== loadGeneration) return; // superseded by a newer date/view change — don't clobber it
     state.log = log;
+    setBase(log);
     subscribeLog(v);
   }catch(e){
     if(myGen !== loadGeneration) return;
@@ -758,7 +812,7 @@ async function changeDate(v){
 function addVisit(room){
   if(!guardEdit()) return;
   state.log.rooms[room].push({ id:uid(), customer:'', phone:'', payments:[], birdieCount:0, createdBy: session?session.name:'' });
-  markDirty();
+  persistAndRender(); // structural: commit right away so the new card exists server-side
 }
 function removeVisit(room, visitId){
   if(!guardEdit()) return;
@@ -766,7 +820,8 @@ function removeVisit(room, visitId){
   const v = getVisit(room, visitId);
   noteCrossStaffEdit(room, v, '방문 전체 삭제');
   state.log.rooms[room] = state.log.rooms[room].filter(v=>v.id!==visitId);
-  markDirty();
+  dirtyVisits.delete(visitId); // its card (and 저장 button) is gone
+  persistAndRender();
 }
 function getVisit(room, visitId){
   return state.log.rooms[room].find(v=>v.id===visitId);
@@ -844,7 +899,7 @@ function submitBooking(){
   if(conflict){ alert('선택한 시간대에 이미 다른 예약이 있습니다. 시간을 다시 선택해주세요.'); return; }
   visits.push({ id:uid(), customer:name, phone, payments:[], birdieCount:0, bookingStart:start, bookingEnd:end, createdBy: session?session.name:'' });
   bookingDialog = null;
-  markDirty();
+  persistAndRender(); // structural: a new booking should land on the board for everyone immediately
 }
 // Edits an existing visit's booking range directly from the room panel (not
 // just via the board's create dialog), keeping both views in sync. Rejects
@@ -857,7 +912,7 @@ function setBookingRange(room, visitId, field, value){
     delete v.bookingStart;
     delete v.bookingEnd;
     noteCrossStaffEdit(room, v, `예약 시간 해제 (${oldRange} → 미지정)`);
-    markDirty();
+    markDirty(visitId);
     return;
   }
   let newStart = field==='start' ? value : v.bookingStart;
@@ -876,7 +931,7 @@ function setBookingRange(room, visitId, field, value){
   v.bookingStart = newStart;
   v.bookingEnd = newEnd;
   noteCrossStaffEdit(room, v, `예약 시간 변경 (${oldRange} → ${newStart}~${newEnd})`);
-  markDirty();
+  markDirty(visitId);
 }
 // Clicking a booked slot on the board jumps to that visit's card in the room
 // panel below and expands only it — every other card in that room folds, so
@@ -894,18 +949,18 @@ function focusVisitFromBoard(room, visitId){
 }
 function setCustomer(room, visitId, v){
   if(isBlockedForEdit()) return;
-  getVisit(room, visitId).customer = v; markDirtyQuiet();
+  getVisit(room, visitId).customer = v; markDirtyQuiet(visitId);
 }
 function setPhone(room, visitId, v){
   if(isBlockedForEdit()) return;
-  getVisit(room, visitId).phone = v; markDirtyQuiet();
+  getVisit(room, visitId).phone = v; markDirtyQuiet(visitId);
 }
 function addPayment(room, visitId){
   if(!guardEdit()) return;
   const v = getVisit(room, visitId);
   v.payments.push({ id:uid(), type:'GAME', method:'cash', amount:0, memo:'' });
   noteCrossStaffEdit(room, v, '결제 항목 추가');
-  markDirty();
+  markDirty(visitId);
 }
 const FIELD_LABEL = { amount:'금액', method:'결제수단', type:'항목 종류' };
 // No confirm-before-overwrite prompt here — the 저장 button is now the
@@ -920,13 +975,13 @@ function updatePayment(room, visitId, payId, field, value){
   const oldVal = p[field];
   p[field] = newVal;
   if(changed) noteCrossStaffEdit(room, v, `결제 ${FIELD_LABEL[field]} 수정 (${oldVal===''||oldVal==null?'-':oldVal} → ${newVal})`);
-  markDirty();
+  markDirty(visitId);
 }
 function updatePaymentQuiet(room, visitId, payId, field, value){
   if(isBlockedForEdit()) return;
   const p = getVisit(room, visitId).payments.find(p=>p.id===payId);
   p[field] = value;
-  markDirtyQuiet();
+  markDirtyQuiet(visitId);
 }
 function removePayment(room, visitId, payId){
   if(!guardEdit()) return;
@@ -934,7 +989,7 @@ function removePayment(room, visitId, payId){
   const v = getVisit(room, visitId);
   v.payments = v.payments.filter(p=>p.id!==payId);
   noteCrossStaffEdit(room, v, '결제 내역 삭제');
-  markDirty();
+  markDirty(visitId);
 }
 function setBirdie(room, visitId, v){
   if(!guardEdit()) return;
@@ -943,7 +998,7 @@ function setBirdie(room, visitId, v){
   const oldVal = visit.birdieCount||0;
   visit.birdieCount = newVal;
   if(oldVal !== newVal) noteCrossStaffEdit(room, visit, `버디 횟수 변경 (${oldVal}회 → ${newVal}회)`);
-  markDirty();
+  markDirty(visitId);
 }
 function addPractice(){
   if(!guardEdit()) return;
@@ -1025,7 +1080,10 @@ function toggleMobileMenu(){ mobileMenuOpen = !mobileMenuOpen; render(); }
 function closeMobileMenu(){ mobileMenuOpen = false; render(); }
 function selectMobileView(key){
   mobileMenuOpen = false;
-  if(key==='edit'){ state.view='edit'; render(); }
+  // Returning to the editor must pull in anything that changed while we were
+  // away, otherwise state.log is stale and the next save writes that stale
+  // copy over the server — the loop that kept making saved info disappear.
+  if(key==='edit'){ state.view='edit'; applyPendingRemote(); render(); }
   else if(key==='list'){ openListView(); }
   else if(key==='admin'){ openAdminView(); }
   else if(key==='manual'){ state.view='manual'; render(); }
@@ -1126,7 +1184,7 @@ function renderNav(){
   return `
     <div class="view-toggle">
       <div class="nav-links">
-        <button class="btn ${state.view==='edit'?'primary':''}" onclick="state.view='edit';render()"><span class="lbl-full">✏️ 일지 입력</span><span class="lbl-short">✏️ 일지</span></button>
+        <button class="btn ${state.view==='edit'?'primary':''}" onclick="selectMobileView('edit')"><span class="lbl-full">✏️ 일지 입력</span><span class="lbl-short">✏️ 일지</span></button>
         <button class="btn manual-btn ${state.view==='manual'?'primary':''}" onclick="state.view='manual';render()">📖 사용법</button>
         ${isAdmin() ? `
           <button class="btn ${state.view==='list'?'primary':''}" onclick="openListView()"><span class="lbl-full">📊 조회/통계</span><span class="lbl-short">📊 통계</span></button>
@@ -1173,7 +1231,8 @@ function renderManualView(){
         <li><b>"+ 결제 추가"</b>로 결제 항목을 추가합니다: 항목 종류(게임비/홀인원응모(S)/기타), 결제수단(현금/카드/이체), 금액, 메모(예: 맥주, 8000x2) 순서로 입력합니다. 결제는 한 방문에 여러 건 추가할 수 있습니다.</li>
         <li><b>버디 횟수</b>를 입력하면 지급액(1회당 100원)이 자동 계산됩니다.</li>
         <li>카드 맨 위 요약 줄을 클릭하면 카드를 접었다 펼 수 있습니다.</li>
-        <li>수정한 내용은 바로 저장되지 않습니다. 상단의 <b>"💾 저장"</b> 버튼을 눌러야 실제로 반영됩니다(버튼이 파란색으로 바뀌면 저장할 내용이 있다는 뜻입니다).</li>
+        <li>이름·연락처·예약시간·결제·버디 횟수를 수정하면 바로 저장되지 않고, 카드 오른쪽 위에 <b>"● 미저장"</b> 표시가 나타납니다. 카드 아래쪽 <b>"💾 저장"</b> 버튼(파란색으로 바뀝니다)을 눌러야 실제로 반영됩니다.</li>
+        <li>방문 추가/삭제와 상황판에서 만든 예약은 곧바로 저장됩니다.</li>
         <li>다른 직원이 이미 입력한 방문을 수정하면 관리자 페이지의 변경 이력에 자동으로 기록되고, 저장 버튼을 누를 때마다 누가 저장했는지도 함께 기록됩니다.</li>
       </ul>
     `)}
@@ -1275,7 +1334,6 @@ function renderEditView(){
         <span class="method-tag desktop-only-info" style="background:#eef2ff;color:var(--accent);">담당자: ${escHtml(log.staff || session.name)}</span>
         <div class="spacer"></div>
         <span class="autosave-badge desktop-only-info" id="lastSavedBadge">${lastSavedAt ? '✔ 마지막 저장 ' + lastSavedAt.toLocaleTimeString('ko-KR') : '자동 저장 대기중'}</span>
-        <button class="btn ${hasUnsavedChanges?'primary':''}" id="saveLogBtn" ${hasUnsavedChanges?'':'disabled'} onclick="saveLogChanges()">💾 저장${hasUnsavedChanges?'*':''}</button>
         ${log.closed
           ? `<span class="method-tag transfer mobile-only-close">🔒 마감됨</span>${isAdmin() ? `<button class="btn small mobile-only-close" onclick="reopenDay()">🔓 마감 취소</button>` : ''}`
           : `<button class="btn mobile-only-close" onclick="closeDay()">🔒 마감 처리</button>`}
@@ -1328,6 +1386,7 @@ function toggleVisitCollapse(visitId){
 function renderVisitCard(room, v){
   const locked = isLocked();
   const collapsed = collapsedVisits.has(v.id);
+  const dirty = dirtyVisits.has(v.id);
   const total = v.payments.reduce((s,p)=>s+(Number(p.amount)||0), 0);
   const bookingLabel = v.bookingStart ? `예약 ${v.bookingStart}~${v.bookingEnd}` : '시간 미지정';
   const summaryBar = `
@@ -1335,6 +1394,7 @@ function renderVisitCard(room, v){
       <span class="collapse-arrow">${collapsed?'▶':'▼'}</span>
       <b>${escHtml(v.customer)||'(이름 미입력)'}</b>
       <span class="visit-summary-meta">${bookingLabel} · 결제 ${fmt(total)}원</span>
+      ${dirty?'<span class="unsaved-dot" title="저장하지 않은 변경사항이 있습니다">● 미저장</span>':''}
     </div>
   `;
   if(collapsed){
@@ -1373,7 +1433,7 @@ function renderVisitCard(room, v){
       </div>
 
       <div class="visit-foot">
-        <span></span>
+        <button class="btn small ${dirty?'primary':''}" id="saveBtn-${v.id}" ${locked||!dirty?'disabled':''} onclick="saveLogChanges()">💾 저장</button>
         <button class="btn small danger" ${locked?'disabled':''} onclick="removeVisit('${room}','${v.id}')">방문 삭제</button>
       </div>
     </div>
@@ -1530,7 +1590,7 @@ function renderListView(){
 
 async function loadDateIntoEditor(date){
   if(!confirmDiscardIfDirty()) return;
-  hasUnsavedChanges = false;
+  dirtyVisits.clear();
   const myGen = ++loadGeneration;
   state.currentDate = date;
   state.log = null;
@@ -1540,6 +1600,7 @@ async function loadDateIntoEditor(date){
     const log = await loadLog(date); // fresh read, not the list-view snapshot — another device may have changed it since
     if(myGen !== loadGeneration) return;
     state.log = log;
+    setBase(log);
     subscribeLog(date);
   }catch(e){
     if(myGen !== loadGeneration) return;
@@ -1704,6 +1765,7 @@ function escAttr(s){ return escHtml(s); }
       if(saved) session = JSON.parse(saved);
     }catch(e){ session = null; }
     state.log = await loadLog(state.currentDate);
+    setBase(state.log);
     subscribeLog(state.currentDate);
     render();
   }catch(e){
