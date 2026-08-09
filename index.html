@@ -198,13 +198,15 @@
     .lbl-short{display:inline;}
     .view-toggle{display:none;}
 
-    #header{position:sticky;top:0;z-index:600;background:var(--bg);}
-    .app-header{padding:10px 0;margin-bottom:8px;}
+    #header{position:sticky;top:0;z-index:600;background:#fff;}
+    .app-header{padding:10px 0;margin-bottom:8px;position:relative;justify-content:flex-end;}
+    .app-header h1{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);font-size:16px;white-space:nowrap;}
     .hamburger-btn{
       display:flex;align-items:center;justify-content:center;flex-shrink:0;
-      width:36px;height:36px;border-radius:var(--radius-sm);border:1px solid var(--line);
-      background:#fff;font-size:18px;cursor:pointer;
+      width:40px;height:40px;border:none;background:transparent;
+      font-size:24px;line-height:1;color:var(--ink);cursor:pointer;
     }
+    .hamburger-btn.active{color:var(--accent);}
     .mobile-drawer-backdrop.open{display:block;position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:899;}
     .mobile-drawer{display:flex;}
     .mobile-drawer.open{transform:translateX(0);}
@@ -216,6 +218,9 @@
     }
     .date-row .mobile-only-close{display:inline-flex;}
     .date-row .desktop-only-info{display:none;}
+
+    .tabs{flex-wrap:nowrap;overflow-x:visible;gap:4px;}
+    .tab{flex:1 1 0;text-align:center;padding:7px 2px;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
   }
 </style>
 </head>
@@ -934,7 +939,7 @@ function renderHeader(){
   return `
     <div class="app-header">
       <h1>🏌️ 스크린골프 일지 정산</h1>
-      <button class="hamburger-btn" onclick="toggleMobileMenu()" aria-label="메뉴">☰</button>
+      <button class="hamburger-btn ${mobileMenuOpen?'active':''}" onclick="toggleMobileMenu()" aria-label="메뉴">☰</button>
     </div>
     <div class="mobile-drawer-backdrop ${mobileMenuOpen?'open':''}" onclick="closeMobileMenu()"></div>
     <div class="mobile-drawer ${mobileMenuOpen?'open':''}">
