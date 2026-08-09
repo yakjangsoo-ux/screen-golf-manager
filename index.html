@@ -46,7 +46,7 @@
     padding:12px 14px;margin-bottom:14px;
   }
   .topbar label{font-size:13px;color:var(--ink-muted);margin-right:4px;}
-  .date-row{padding-top:6px;padding-bottom:6px;}
+  .date-row{padding-top:12px;padding-bottom:12px;}
   .topbar input[type=date], .topbar input[type=text]{
     padding:6px 8px;border:1px solid var(--line);border-radius:var(--radius-sm);font-size:14px;
   }
@@ -84,8 +84,8 @@
   .visit-head select, .visit-head input[type=text], .visit-head input[type=tel]{
     height:30px;box-sizing:border-box;padding:0 8px;border:1px solid var(--line);border-radius:var(--radius-sm);font-size:13px;background:#fff;color:var(--ink);
   }
-  .visit-head input.customer{flex:0 1 90px;min-width:64px;}
-  .visit-head input.phone{flex:1 1 130px;min-width:110px;}
+  .visit-head select{width:78px;flex:0 0 auto;}
+  .visit-head input.customer, .visit-head input.phone{flex:1 0 100%;min-width:0;}
 
   .payments{display:flex;flex-direction:column;gap:6px;margin:8px 0;}
   .pay-row{display:flex;gap:6px;align-items:center;flex-wrap:wrap;}
@@ -220,7 +220,7 @@
     .mobile-drawer{display:flex;}
     .mobile-drawer.open{transform:translateX(0);}
 
-    .date-row{flex-wrap:nowrap;overflow-x:auto;padding:4px 12px;margin-bottom:8px;}
+    .date-row{flex-wrap:nowrap;overflow-x:auto;padding:9px 12px;margin-bottom:8px;}
     .date-row > *{flex-shrink:0;}
     .date-row input[type=date], .date-row .weekday, .date-row .btn, .date-row .method-tag{
       height:32px;box-sizing:border-box;display:inline-flex;align-items:center;
@@ -1108,7 +1108,7 @@ function renderBoard(){
           return `<tr><td class="board-room-col">${ROOM_LABEL[room]||room}</td>${renderBoardRow(room, visits, c.label)}</tr>`;
         }).join('')}
       </table>
-      <div class="board-legend"><span class="board-cell-demo free"></span>예약 가능(클릭 시 예약, 드래그하면 시작/종료 시간이 자동 설정됨)<span class="board-cell-demo occupied"></span>예약됨(클릭 시 아래 방문 정보로 이동, 예약자 이름 표시)</div>
+      <div class="board-legend"><span class="board-cell-demo free"></span>예약 가능<span class="board-cell-demo occupied"></span>예약됨</div>
     </div>
     ${renderBookingDialog()}
   `;
