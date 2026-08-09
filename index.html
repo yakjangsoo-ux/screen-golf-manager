@@ -404,32 +404,58 @@ function deepCopy(o){ return JSON.parse(JSON.stringify(o)); }
 let baseLog = null;
 function setBase(log){ baseLog = deepCopy(log); }
 
-// Merges the local draft onto whatever the server currently holds, instead
-// of blindly overwriting the whole document. Per-visit (and per-practice-row)
-// last-writer-wins, EXCEPT that rows another device created after we last
-// synced are preserved rather than erased — a plain .set(state.log) wiped
-// them, which is what kept making saved info disappear.
+// ---- 3-way merge (server vs. our draft vs. the state we last synced) ----
+// Granularity matters: an earlier version merged whole visits, so a visit
+// both sides knew about was taken from our draft wholesale — silently
+// erasing a 결제 another device had added inside it. Everything below merges
+// down to individual fields and individual payment rows.
+const same = (a,b) => JSON.stringify(a) === JSON.stringify(b);
+// Per-field: a field we actually changed keeps our value; a field we left
+// alone takes the server's (so remote edits survive). Works for deletions
+// too — an absent key is just `undefined` on either side.
+function mergeFields(server, local, base, skipKeys){
+  const out = {};
+  const keys = new Set([...Object.keys(server||{}), ...Object.keys(local||{})]);
+  keys.forEach(k=>{
+    if(skipKeys && skipKeys.has(k)) return;
+    const s = server ? server[k] : undefined;
+    const l = local ? local[k] : undefined;
+    const b = base ? base[k] : undefined;
+    if(!same(l, b)){ if(l !== undefined) out[k] = l; }   // we changed it (or removed it)
+    else if(s !== undefined) out[k] = s;                  // untouched by us -> server wins
+  });
+  return out;
+}
+// Per-row for id-keyed arrays (visits, payments, practice rows).
+function mergeById(serverList, localList, baseList, mergeItem){
+  serverList = serverList || []; localList = localList || []; baseList = baseList || [];
+  const sById = new Map(serverList.map(x=>[x.id, x]));
+  const bById = new Map(baseList.map(x=>[x.id, x]));
+  const lById = new Map(localList.map(x=>[x.id, x]));
+  const out = localList.map(lx => mergeItem(sById.get(lx.id), lx, bById.get(lx.id)));
+  serverList.forEach(sx=>{
+    // Unknown to both our draft and our sync base => created elsewhere after
+    // we loaded. Keep it. (Present in base but not local = we deleted it.)
+    if(!lById.has(sx.id) && !bById.has(sx.id)) out.push(sx);
+  });
+  return out;
+}
+const mergeRow = (s,l,b) => mergeFields(s,l,b);
+function mergeVisit(s, l, b){
+  const v = mergeFields(s, l, b, new Set(['payments']));
+  v.payments = mergeById(s && s.payments, l && l.payments, b && b.payments, mergeRow);
+  return v;
+}
 function mergeForSave(serverLog, localLog, base){
-  const merged = deepCopy(localLog);
-  if(!serverLog) return merged;
-  const baseRooms = (base && base.rooms) || {};
-  const serverRooms = serverLog.rooms || {};
+  if(!serverLog) return deepCopy(localLog);
+  const merged = mergeFields(serverLog, localLog, base, new Set(['rooms','practice']));
+  merged.rooms = {};
   ROOMS.forEach(r=>{
-    const localList = merged.rooms[r] || (merged.rooms[r] = []);
-    const localIds = new Set(localList.map(v=>v.id));
-    const baseIds = new Set((baseRooms[r] || []).map(v=>v.id));
-    (serverRooms[r] || []).forEach(sv=>{
-      // Unknown to both our draft and our sync base => created elsewhere
-      // after we loaded. Keep it; deleting it would be data loss.
-      if(!localIds.has(sv.id) && !baseIds.has(sv.id)) localList.push(sv);
-    });
+    merged.rooms[r] = mergeById(
+      (serverLog.rooms||{})[r], (localLog.rooms||{})[r], ((base&&base.rooms)||{})[r], mergeVisit);
   });
-  const localP = merged.practice || (merged.practice = []);
-  const localPIds = new Set(localP.map(p=>p.id));
-  const basePIds = new Set(((base && base.practice) || []).map(p=>p.id));
-  (serverLog.practice || []).forEach(sp=>{
-    if(!localPIds.has(sp.id) && !basePIds.has(sp.id)) localP.push(sp);
-  });
+  merged.practice = mergeById(
+    serverLog.practice, localLog.practice, base && base.practice, mergeRow);
   return merged;
 }
 // Single commit path for every write. Runs in a transaction so the merge
@@ -781,9 +807,15 @@ window.addEventListener('beforeunload', e=>{
 });
 // Retry-on-failure safety net only — never a blind periodic re-save, which
 // is how a tab left open on a stale copy used to stomp other devices' work.
+// Also flushes any remote update we had to defer, so one can't sit unapplied
+// indefinitely if the user leaves focus parked in a field.
 setInterval(()=>{
   if(state.log && lastSaveFailed) commitLog();
+  applyPendingRemote();
 }, 60000);
+// Coming back to the tab (phone unlocked, app re-focused) is a natural point
+// to pick up whatever changed while it was in the background.
+document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) applyPendingRemote(); });
 
 // ---------- mutation helpers ----------
 // (all mutations respect isLocked()/guardEdit() — see "day close / lock" section above)
