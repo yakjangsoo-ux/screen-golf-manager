@@ -21,6 +21,9 @@
     --danger:#e0453d;
     --accent:#0066cc;
     --accent-focus:#0071e3;
+    --occupied-bg:#dce9ff;       /* 상황판: 룸별 무지개색 대신 단일 포인트 컬러(accent 계열)로 예약 칸을 표시 */
+    --occupied-bg-hover:#c9deff;
+    --occupied-text:#0b4a8f;
     --radius-pill:9999px;
     --radius-lg:18px;
     --radius-md:11px;
@@ -112,7 +115,16 @@
   .method-btn.transfer.active{background:var(--transfer-bg);border-color:var(--transfer);font-weight:bold;}
 
   .birdie-row{display:flex;gap:8px;align-items:center;font-size:12px;margin-top:4px;color:var(--ink-muted);}
-  .birdie-row input{width:50px;padding:4px 6px;border:1px solid var(--line);border-radius:var(--radius-sm);}
+  .birdie-icon{flex-shrink:0;}
+  .birdie-stepper{display:inline-flex;align-items:stretch;border:1px solid var(--line);border-radius:var(--radius-sm);overflow:hidden;background:#fff;}
+  .birdie-stepper button{width:22px;border:none;background:#fff;cursor:pointer;font-size:13px;line-height:1;color:var(--ink);}
+  .birdie-stepper button:hover:not(:disabled){background:var(--bg);}
+  .birdie-stepper button:disabled{opacity:0.35;cursor:default;}
+  .birdie-stepper input{
+    width:34px;height:22px;border:none;border-left:1px solid var(--line);border-right:1px solid var(--line);
+    text-align:center;padding:0;font-size:12px;-moz-appearance:textfield;appearance:textfield;
+  }
+  .birdie-stepper input::-webkit-outer-spin-button, .birdie-stepper input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0;}
 
   .visit-foot{display:flex;justify-content:space-between;align-items:center;margin-top:6px;}
   .visit-summary-bar{display:flex;align-items:center;gap:8px;cursor:pointer;padding:4px 2px;border-radius:var(--radius-sm);margin-bottom:4px;}
@@ -157,20 +169,22 @@
   .board-card .board-wrap{border:none;border-radius:0;margin-bottom:0;}
   .board-wrap{overflow-x:auto;background:var(--card-white);border:1px solid var(--line);border-radius:var(--radius-lg);padding:12px;margin-bottom:14px;}
   .board-table{border-collapse:collapse;font-size:11px;user-select:none;}
-  .board-table th, .board-table td{border:1px solid var(--line);padding:0;text-align:center;white-space:nowrap;}
+  .board-table th, .board-table td{border-bottom:1px solid var(--line);border-right:1px dashed #eee;padding:0;text-align:center;white-space:nowrap;}
+  .board-table th:last-child, .board-table td:last-child{border-right:none;}
   .board-table th{background:var(--bg);padding:4px 3px;font-size:10px;font-weight:normal;color:var(--ink-muted);}
+  .board-table td.board-room-col{border-right:1px solid var(--line);}
   .board-room-col{position:sticky;left:0;background:var(--bg);z-index:2;padding:4px 10px !important;text-align:left;font-weight:bold;font-size:12px;}
   .board-cell{width:32px;height:38px;cursor:pointer;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:0 3px;}
   .board-cell.free{background:#fff;}
-  .board-cell.free:hover{background:#eef7e3;}
+  .board-cell.free:hover{background:#eef4ff;}
   .board-cell.free.selecting{background:var(--accent) !important;opacity:0.5;}
-  .board-cell.occupied{color:#7a2050;font-weight:bold;}
-  .board-cell.occupied:hover{filter:brightness(0.93);}
+  .board-cell.occupied{background:var(--occupied-bg);color:var(--occupied-text);font-weight:bold;}
+  .board-cell.occupied:hover{background:var(--occupied-bg-hover);}
   .board-legend{font-size:11px;color:var(--ink-muted);margin-top:8px;}
   .board-cell-demo{display:inline-block;width:12px;height:12px;border:1px solid var(--line);vertical-align:middle;margin:0 4px 0 10px;}
   .board-cell-demo:first-child{margin-left:0;}
   .board-cell-demo.free{background:#fff;}
-  .board-cell-demo.occupied{background:var(--card-bg);}
+  .board-cell-demo.occupied{background:var(--occupied-bg);}
 
   .modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;z-index:1000;}
   .modal-box{background:#fff;border-radius:var(--radius-lg);padding:20px;width:min(300px, 92vw);display:flex;flex-direction:column;gap:6px;}
@@ -279,19 +293,6 @@ let db; // set in init() after firebase.initializeApp()
 
 const ROOMS = ['R1','R2','R3','R5','R6','R7','R8','R9'];
 const ROOM_LABEL = {};
-// Per-room tint for the 상황판(board): a stronger shade for the room-name
-// cell, a light version to tint that row's empty slots so a row stays easy
-// to trace across many time columns.
-const ROOM_COLORS = {
-  R1: { label:'#f6c9c9', row:'#fdeeee' },
-  R2: { label:'#f7dcbb', row:'#fdf2e2' },
-  R3: { label:'#f0ecb0', row:'#faf8de' },
-  R5: { label:'#c0e6ae', row:'#e9f7e1' },
-  R6: { label:'#b3e4dc', row:'#e2f6f3' },
-  R7: { label:'#b7d2f2', row:'#e5eefc' },
-  R8: { label:'#cdc0ef', row:'#eee8fb' },
-  R9: { label:'#f0bfdd', row:'#fbe7f3' },
-};
 const WEEKDAYS = ['일','월','화','수','목','금','토'];
 const STORAGE_PREFIX = 'sgledger_';
 const METHODS = [
@@ -1138,7 +1139,7 @@ function renderManualView(){
     `)}
     ${isAdmin() ? manualSection('🛠 관리자 전용 기능', `
       <ul style="margin:0;padding-left:18px;line-height:1.8;">
-        <li><b>📊 조회/통계</b> — 월별로 날짜별/룸별 매출 합계를 확인하고, 지난 일지를 편집하거나 삭제할 수 있습니다.</li>
+        <li><b>📊 조회/통계</b> — 월별로 날짜별 매출 합계를 확인할 수 있습니다. 날짜를 클릭하면 해당 일지 편집 화면으로 이동합니다.</li>
         <li><b>🛠 관리자 페이지</b> — 관리자 비밀번호 변경, 기간별 엑셀 출력(최대 1개월, 날짜별 탭으로 구분), 직원 계정 추가/비밀번호 재설정/삭제, 전체 변경 이력 확인이 가능합니다.</li>
       </ul>
     `) : ''}
@@ -1153,8 +1154,7 @@ function renderBoard(){
         <tr><th class="board-room-col">룸</th>${BOARD_SLOTS.map(s=>`<th>${s.endsWith(':00')?s:''}</th>`).join('')}</tr>
         ${ROOMS.map(room=>{
           const visits = state.log.rooms[room] || [];
-          const c = ROOM_COLORS[room] || { label:'#f0f0f0', row:'#fff' };
-          return `<tr><td class="board-room-col">${ROOM_LABEL[room]||room}</td>${renderBoardRow(room, visits, c.label)}</tr>`;
+          return `<tr><td class="board-room-col">${ROOM_LABEL[room]||room}</td>${renderBoardRow(room, visits)}</tr>`;
         }).join('')}
       </table>
       <div class="board-legend"><span class="board-cell-demo free"></span>예약 가능<span class="board-cell-demo occupied"></span>예약됨</div>
@@ -1166,7 +1166,7 @@ function renderBoard(){
 // belong to the same booking into one wide cell (colspan) so the
 // reservation's name is shown once across its full occupied span, not
 // truncated per-slot.
-function renderBoardRow(room, visits, occupiedColor){
+function renderBoardRow(room, visits){
   let html = '';
   let i = 0;
   while(i < BOARD_SLOTS.length){
@@ -1175,11 +1175,11 @@ function renderBoardRow(room, visits, occupiedColor){
     if(owner && slot === owner.bookingStart){
       const span = Math.max(1, Math.round((toMinutes(owner.bookingEnd) - toMinutes(owner.bookingStart)) / 30));
       const tip = `${owner.customer||''}${owner.phone?' ☎'+owner.phone:''} (${owner.bookingStart}~${owner.bookingEnd})`;
-      html += `<td class="board-cell occupied" colspan="${span}" style="background:${occupiedColor};" title="${escAttr(tip)}" onclick="focusVisitFromBoard('${room}','${owner.id}')">${escHtml(owner.customer||'')}</td>`;
+      html += `<td class="board-cell occupied" colspan="${span}" title="${escAttr(tip)}" onclick="focusVisitFromBoard('${room}','${owner.id}')">${escHtml(owner.customer||'')}</td>`;
       i += span;
     } else if(owner){
       // Defensive fallback for pre-existing overlapping data; normal use never reaches this.
-      html += `<td class="board-cell occupied" style="background:${occupiedColor};" title="${escAttr(owner.customer||'')}" onclick="focusVisitFromBoard('${room}','${owner.id}')"></td>`;
+      html += `<td class="board-cell occupied" title="${escAttr(owner.customer||'')}" onclick="focusVisitFromBoard('${room}','${owner.id}')"></td>`;
       i += 1;
     } else {
       html += `<td class="board-cell free" data-room="${room}" data-slot="${slot}" title="${slot} 예약하기(드래그로 시간대 선택 가능)" onmousedown="event.preventDefault();startBoardDrag('${room}','${slot}')" onmouseenter="extendBoardDrag('${room}','${slot}')"></td>`;
@@ -1315,8 +1315,13 @@ function renderVisitCard(room, v){
       <button class="btn small" ${locked?'disabled':''} onclick="addPayment('${room}','${v.id}')">+ 결제 추가</button>
 
       <div class="birdie-row">
-        🐦 버디 횟수:
-        <input type="number" min="0" value="${v.birdieCount||0}" ${locked?'disabled':''} onchange="setBirdie('${room}','${v.id}',this.value)">
+        <svg class="birdie-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 14c3-6 7-6 10 0 3-6 7-6 10 0"/></svg>
+        버디 횟수:
+        <div class="birdie-stepper">
+          <button type="button" ${locked?'disabled':''} ${(v.birdieCount||0)<=0?'disabled':''} onclick="setBirdie('${room}','${v.id}', ${Math.max(0,(v.birdieCount||0)-1)})">−</button>
+          <input type="number" min="0" value="${v.birdieCount||0}" ${locked?'disabled':''} onchange="setBirdie('${room}','${v.id}',this.value)">
+          <button type="button" ${locked?'disabled':''} onclick="setBirdie('${room}','${v.id}', ${(v.birdieCount||0)+1})">+</button>
+        </div>
         회 → 지급액 <b>${fmt((v.birdieCount||0)*100)}</b>원
       </div>
 
@@ -1436,25 +1441,15 @@ function renderListView(){
 
   let monthTotals = {cash:0,card:0,transfer:0};
   let monthSg=0, monthBirdie=0;
-  const roomMonthTotals = Object.fromEntries(ROOMS.map(r=>[r,{cash:0,card:0,transfer:0}]));
   const rows = monthDates.map(d=>{
     const log = logsByDate[d];
     const s = computeSummary(log);
     monthTotals.cash+=s.totals.cash; monthTotals.card+=s.totals.card; monthTotals.transfer+=s.totals.transfer;
     monthSg += s.sgTotal; monthBirdie += s.birdieTotal;
-    ROOMS.forEach(r=>{
-      roomMonthTotals[r].cash += s.roomTotals[r].cash;
-      roomMonthTotals[r].card += s.roomTotals[r].card;
-      roomMonthTotals[r].transfer += s.roomTotals[r].transfer;
-    });
     return `<tr>
       <td class="label"><a href="#" onclick="loadDateIntoEditor('${d}');return false;">${d.slice(5)} (${weekdayLabel(d)})</a> ${log.closed?'🔒':''}</td>
       <td>${fmt(s.totals.cash)}</td><td>${fmt(s.totals.card)}</td><td>${fmt(s.totals.transfer)}</td>
       <td><b>${fmt(s.grandTotal)}</b></td>
-      <td class="row-actions">
-        <button class="btn small" onclick="loadDateIntoEditor('${d}')">편집</button>
-        <button class="btn small danger" onclick="deleteDateRow('${d}')">삭제</button>
-      </td>
     </tr>`;
   }).join('');
 
@@ -1470,21 +1465,9 @@ function renderListView(){
     <div class="list-table-wrap">
       <h2 style="font-size:15px;margin-top:0;">${state.listMonth} 일별 매출</h2>
       <table>
-        <tr><th class="label">날짜</th><th>현금</th><th>카드</th><th>이체</th><th>합계</th><th>관리</th></tr>
-        ${rows || '<tr><td colspan="6" style="text-align:center;color:#999;">저장된 일지가 없습니다</td></tr>'}
-        <tr class="grand-row"><td class="label">월 합계</td><td>${fmt(monthTotals.cash)}</td><td>${fmt(monthTotals.card)}</td><td>${fmt(monthTotals.transfer)}</td><td>${fmt(monthTotals.cash+monthTotals.card+monthTotals.transfer)}</td><td></td></tr>
-      </table>
-    </div>
-
-    <div class="list-table-wrap">
-      <h2 style="font-size:15px;margin-top:0;">${state.listMonth} 룸별 매출</h2>
-      <table>
-        <tr><th class="label">룸</th><th>현금</th><th>카드</th><th>이체</th><th>합계</th></tr>
-        ${ROOMS.map(r=>{
-          const rt = roomMonthTotals[r];
-          const tot = rt.cash+rt.card+rt.transfer;
-          return `<tr><td class="label">${ROOM_LABEL[r]||r}</td><td>${fmt(rt.cash)}</td><td>${fmt(rt.card)}</td><td>${fmt(rt.transfer)}</td><td><b>${fmt(tot)}</b></td></tr>`;
-        }).join('')}
+        <tr><th class="label">날짜</th><th>현금</th><th>카드</th><th>이체</th><th>합계</th></tr>
+        ${rows || '<tr><td colspan="5" style="text-align:center;color:#999;">저장된 일지가 없습니다</td></tr>'}
+        <tr class="grand-row"><td class="label">월 합계</td><td>${fmt(monthTotals.cash)}</td><td>${fmt(monthTotals.card)}</td><td>${fmt(monthTotals.transfer)}</td><td>${fmt(monthTotals.cash+monthTotals.card+monthTotals.transfer)}</td></tr>
       </table>
     </div>
 
