@@ -189,6 +189,7 @@
   .list-table-wrap{background:var(--card-white);border:1px solid var(--line);border-radius:var(--radius-lg);padding:14px;margin-bottom:14px;overflow-x:auto;}
   select.month-select{padding:6px 8px;border:1px solid var(--line);border-radius:var(--radius-sm);}
   .row-actions{display:flex;gap:4px;}
+  .audit-pager{display:flex;align-items:center;justify-content:center;gap:12px;margin-top:10px;font-size:12px;color:var(--ink-muted);}
   footer{text-align:center;color:var(--ink-muted);font-size:11px;margin-top:20px;}
 
   @media (max-width: 480px){
@@ -342,18 +343,12 @@ function endTimeOptions(start){
 function toMinutes(t){ const [h,m] = t.split(':').map(Number); return h*60+m; }
 const SESSION_KEY = STORAGE_PREFIX + 'session';
 const DEFAULT_ADMIN_PASSWORD = 'daesung1!';
+// Deliberately narrow: only saving or deleting 룸별 카드 content is recorded.
 const AUDIT_TYPE_LABEL = {
-  STAFF_CHANGE: '담당자 변경(교대 인수인계)',
-  CROSS_EDIT: '다른 직원이 작성한 내용 수정',
-  MANUAL_SAVE: '변경사항 저장',
-  CLOSE: '마감 처리',
-  ADMIN_EDIT_ON_CLOSED: '마감 후 수정/삭제(관리자)',
-  REOPEN: '마감 취소(관리자)',
-  PASSWORD_CHANGE: '관리자 비밀번호 변경',
-  STAFF_ADDED: '직원 계정 추가',
-  STAFF_PW_RESET: '직원 비밀번호 재설정',
-  STAFF_REMOVED: '직원 계정 삭제',
+  SAVE: '저장',
+  DELETE: '삭제',
 };
+const AUDIT_PAGE_SIZE = 10;
 
 let session = null; // { role:'admin', name:'admin' } or { role:'staff', name:'홍길동' }
 function isAdmin(){ return !!(session && session.role === 'admin'); }
@@ -583,7 +578,6 @@ async function changeAdminPassword(){
   const confirmPw = prompt('새 비밀번호를 한 번 더 입력하세요');
   if(confirmPw !== newPw){ alert('입력한 두 비밀번호가 서로 다릅니다. 다시 시도해주세요.'); return; }
   await setAdminHash(await sha256(newPw));
-  addAudit(state.currentDate, 'PASSWORD_CHANGE', '관리자 비밀번호가 변경됨');
   alert('비밀번호가 변경되었습니다.');
   render();
 }
@@ -612,7 +606,6 @@ async function addStaffAccount(){
   const staff = { id: uid(), name: trimmed, passwordHash: await sha256(pw) };
   await setStaffDoc(staff);
   state.adminData.staffList.push(staff);
-  addAudit('-', 'STAFF_ADDED', `직원 "${trimmed}" 추가됨`);
   render();
 }
 async function resetStaffPassword(id){
@@ -622,7 +615,6 @@ async function resetStaffPassword(id){
   if(pw===null || pw.trim()==='') return;
   s.passwordHash = await sha256(pw);
   await setStaffDoc(s);
-  addAudit('-', 'STAFF_PW_RESET', `직원 "${s.name}" 비밀번호 재설정됨`);
   alert('비밀번호가 변경되었습니다.');
   render();
 }
@@ -632,30 +624,28 @@ async function removeStaffAccount(id){
   if(!confirm(`직원 "${s.name}" 계정을 삭제할까요? 이 직원은 더 이상 로그인할 수 없습니다.`)) return;
   await deleteStaffDoc(id);
   state.adminData.staffList = state.adminData.staffList.filter(x=>x.id!==id);
-  addAudit('-', 'STAFF_REMOVED', `직원 "${s.name}" 삭제됨`);
   render();
 }
 
 // ---------- audit log ----------
+// Records who performed the action alongside it, so the 변경 이력 table can
+// show it as its own column rather than baking the name into the text.
+function auditActor(){
+  return session ? (session.name + (isAdmin() ? ' (관리자)' : '')) : '(미상)';
+}
 function addAudit(date, type, detail){
-  db.collection('audit').add({ ts: new Date().toISOString(), date, type, detail })
+  db.collection('audit').add({ ts: new Date().toISOString(), date, type, detail, who: auditActor() })
     .catch(err=>console.warn('감사 로그 기록 실패:', err));
 }
+// Bounded read: the table only pages through recent history, so there's no
+// reason to pull the whole collection down every time the page opens.
 async function getAudit(){
-  const snap = await db.collection('audit').orderBy('ts','desc').get();
+  const snap = await db.collection('audit').orderBy('ts','desc').limit(200).get();
   return snap.docs.map(d=>d.data());
 }
-function commitStaffAudit(newVal, prevVal){
-  if(prevVal !== undefined && prevVal.trim() !== '' && prevVal !== newVal){
-    addAudit(state.log.date, 'STAFF_CHANGE', `${prevVal} → ${newVal}`);
-  }
-}
-// Flags edits to a visit made by someone other than whoever originally
-// created it (v.createdBy), so a later admin review can see that content
-// another employee entered was touched by someone else.
-function noteCrossStaffEdit(room, v, actionDesc){
-  if(!session || !v || !v.createdBy || v.createdBy === session.name) return;
-  addAudit(state.log.date, 'CROSS_EDIT', `${session.name}님이 ${v.createdBy}님이 작성한 ${ROOM_LABEL[room]||room} 예약("${v.customer||'이름없음'}")의 ${actionDesc}`);
+// Describes a visit for the audit detail text, e.g. 'R1 홍길동'.
+function visitLabel(room, v){
+  return `${ROOM_LABEL[room]||room} ${(v && v.customer) || '이름없음'}`;
 }
 
 // ---------- day close / lock ----------
@@ -671,13 +661,9 @@ function guardEdit(){
     render();
     return false;
   }
-  if(state.log.closed && isAdmin()){
-    addAudit(state.log.date, 'ADMIN_EDIT_ON_CLOSED', '관리자가 마감된 일지를 수정함');
-  }
   return true;
 }
-// Lighter guard for quiet (per-keystroke) text fields: blocks but doesn't
-// spam the audit log on every keystroke.
+// Lighter guard for quiet (per-keystroke) text fields.
 function isBlockedForEdit(){
   if(state.log.closed && !isAdmin()){
     alert('마감된 일지입니다. 관리자만 수정할 수 있습니다.');
@@ -693,17 +679,14 @@ function closeDay(){
   state.log.closed = true;
   state.log.closedAt = new Date().toISOString();
   state.log.closedBy = closer;
-  addAudit(state.log.date, 'CLOSE', `${closer}님이 마감 처리함`);
   persistAndRender();
 }
 function reopenDay(){
   if(!isAdmin() || !state.log.closed) return;
   if(!confirm(`${state.log.date} 일지의 마감을 취소하고 다시 직원이 수정할 수 있게 할까요?`)) return;
-  const prevCloser = state.log.closedBy || '-';
   state.log.closed = false;
   delete state.log.closedAt;
   delete state.log.closedBy;
-  addAudit(state.log.date, 'REOPEN', `관리자(${session.name})가 마감을 취소함 (기존 마감자: ${prevCloser})`);
   persistAndRender();
 }
 
@@ -715,6 +698,7 @@ let state = {
   listMonth: null,
   listData: null, // { dates, logsByDate } — prefetched when entering list view
   adminData: null, // { staffList, audit } — prefetched when entering admin view
+  auditPage: 0,    // 0-based page index into adminData.audit (AUDIT_PAGE_SIZE per page)
 };
 // Bumped at the start of every async view/date load below; a load only
 // applies its result if this counter hasn't moved on since it started. This
@@ -746,12 +730,9 @@ function markSaveFailed(){
   if(badge){ badge.textContent = '⚠ 저장 실패 - 인터넷 연결을 확인하세요'; badge.style.color = 'var(--danger)'; }
 }
 // Whoever is logged in as staff and actually edits a day's log becomes its
-// recorded 담당자 — this replaces manually typing a name, and doubles as
-// the handover record between shifts (logged via commitStaffAudit so an
-// admin can later see when responsibility for a date changed hands).
+// recorded 담당자 — this replaces manually typing a name.
 function syncStaffOwnership(){
   if(session && session.role==='staff' && state.log.staff !== session.name){
-    commitStaffAudit(session.name, state.log.staff);
     state.log.staff = session.name;
   }
 }
@@ -812,13 +793,21 @@ async function saveLogChanges(){
   if(a && a !== document.body && typeof a.blur === 'function') a.blur();
   if(!state.log || dirtyVisits.size === 0) return;
   syncStaffOwnership();
-  const who = session ? (session.name + (isAdmin() ? ' (관리자)' : '')) : '(미상)';
+  // Capture which cards are being saved before commitLog() replaces state.log
+  // with the merged result and the dirty set is cleared.
+  const saved = [];
+  dirtyVisits.forEach(id=>{
+    for(const r of ROOMS){
+      const v = (state.log.rooms[r]||[]).find(x=>x.id===id);
+      if(v){ saved.push(visitLabel(r, v)); break; }
+    }
+  });
   const ok = await commitLog();
   if(!ok){
     alert('저장하지 못했습니다. 인터넷 연결을 확인한 뒤 다시 저장해주세요.');
     return; // keep the draft (and its dirty markers) so the user can retry
   }
-  addAudit(state.log.date, 'MANUAL_SAVE', `${who}님이 변경사항을 저장함`);
+  addAudit(state.log.date, 'SAVE', saved.length ? saved.join(', ') : '예약 카드');
   dirtyVisits.clear();
   applyPendingRemote(); // pull in anything that arrived while we were dirty
   render();
@@ -893,7 +882,7 @@ function removeVisit(room, visitId){
   if(!guardEdit()) return;
   if(!confirm('이 방문 기록을 삭제할까요?')) return;
   const v = getVisit(room, visitId);
-  noteCrossStaffEdit(room, v, '방문 전체 삭제');
+  addAudit(state.log.date, 'DELETE', `${visitLabel(room, v)} 방문 삭제`);
   state.log.rooms[room] = state.log.rooms[room].filter(v=>v.id!==visitId);
   dirtyVisits.delete(visitId); // its card (and 저장 button) is gone
   persistAndRender();
@@ -983,10 +972,8 @@ function setBookingRange(room, visitId, field, value){
   if(!guardEdit()) return;
   const v = getVisit(room, visitId);
   if(field==='start' && value===''){
-    const oldRange = v.bookingStart ? `${v.bookingStart}~${v.bookingEnd}` : '미지정';
     delete v.bookingStart;
     delete v.bookingEnd;
-    noteCrossStaffEdit(room, v, `예약 시간 해제 (${oldRange} → 미지정)`);
     markDirty(visitId);
     return;
   }
@@ -1002,10 +989,8 @@ function setBookingRange(room, visitId, field, value){
     render(); // revert the <select> back to the real (unchanged) value
     return;
   }
-  const oldRange = v.bookingStart ? `${v.bookingStart}~${v.bookingEnd}` : '미지정';
   v.bookingStart = newStart;
   v.bookingEnd = newEnd;
-  noteCrossStaffEdit(room, v, `예약 시간 변경 (${oldRange} → ${newStart}~${newEnd})`);
   markDirty(visitId);
 }
 // Clicking a booked slot on the board jumps to that visit's card in the room
@@ -1036,22 +1021,15 @@ function addPayment(room, visitId){
   if(!guardEdit()) return;
   const v = getVisit(room, visitId);
   v.payments.push({ id:uid(), type:'GAME', method:'cash', amount:0, memo:'' });
-  noteCrossStaffEdit(room, v, '결제 항목 추가');
   markDirty(visitId);
 }
 const FIELD_LABEL = { amount:'금액', method:'결제수단', type:'항목 종류' };
-// No confirm-before-overwrite prompt here — the 저장 button is now the
-// actual commit point, so an in-progress edit is cheap to correct before
-// saving. noteCrossStaffEdit still records what changed for later review.
+// Field edits aren't audited individually — only the 저장 that commits them
+// (and deletions) are recorded, so the 변경 이력 stays readable.
 function updatePayment(room, visitId, payId, field, value){
   if(!guardEdit()) return;
-  const v = getVisit(room, visitId);
-  const p = v.payments.find(p=>p.id===payId);
-  const newVal = field==='amount' ? (Number(value)||0) : value;
-  const changed = p[field] !== newVal;
-  const oldVal = p[field];
-  p[field] = newVal;
-  if(changed) noteCrossStaffEdit(room, v, `결제 ${FIELD_LABEL[field]} 수정 (${oldVal===''||oldVal==null?'-':oldVal} → ${newVal})`);
+  const p = getVisit(room, visitId).payments.find(p=>p.id===payId);
+  p[field] = field==='amount' ? (Number(value)||0) : value;
   markDirty(visitId);
 }
 function updatePaymentQuiet(room, visitId, payId, field, value){
@@ -1064,17 +1042,15 @@ function removePayment(room, visitId, payId){
   if(!guardEdit()) return;
   if(!confirm('이 결제 내역을 삭제할까요?')) return;
   const v = getVisit(room, visitId);
-  v.payments = v.payments.filter(p=>p.id!==payId);
-  noteCrossStaffEdit(room, v, '결제 내역 삭제');
+  const p = v.payments.find(p=>p.id===payId);
+  addAudit(state.log.date, 'DELETE',
+    `${visitLabel(room, v)} 결제 삭제 (${payTypeLabel(p.type)} ${fmt(p.amount)}원)`);
+  v.payments = v.payments.filter(x=>x.id!==payId);
   markDirty(visitId);
 }
 function setBirdie(room, visitId, v){
   if(!guardEdit()) return;
-  const visit = getVisit(room, visitId);
-  const newVal = Number(v)||0;
-  const oldVal = visit.birdieCount||0;
-  visit.birdieCount = newVal;
-  if(oldVal !== newVal) noteCrossStaffEdit(room, visit, `버디 횟수 변경 (${oldVal}회 → ${newVal}회)`);
+  getVisit(room, visitId).birdieCount = Number(v)||0;
   markDirty(visitId);
 }
 function addPractice(){
@@ -1218,6 +1194,7 @@ async function openAdminView(){
   const myGen = ++loadGeneration;
   state.view = 'admin';
   state.adminData = null;
+  state.auditPage = 0; // always open the 변경 이력 on the newest page
   render();
   try{
     const [staffList, audit] = await Promise.all([getStaffList(), getAudit()]);
@@ -1310,7 +1287,7 @@ function renderManualView(){
         <li>카드 맨 위 요약 줄을 클릭하면 카드를 접었다 펼 수 있습니다.</li>
         <li>이름·연락처·예약시간·결제·버디 횟수를 수정하면 바로 저장되지 않고, 카드 오른쪽 위에 <b>"● 미저장"</b> 표시가 나타납니다. 카드 아래쪽 <b>"💾 저장"</b> 버튼(파란색으로 바뀝니다)을 눌러야 실제로 반영됩니다.</li>
         <li>방문 추가/삭제와 상황판에서 만든 예약은 곧바로 저장됩니다.</li>
-        <li>다른 직원이 이미 입력한 방문을 수정하면 관리자 페이지의 변경 이력에 자동으로 기록되고, 저장 버튼을 누를 때마다 누가 저장했는지도 함께 기록됩니다.</li>
+        <li>저장하거나 삭제할 때마다 누가 했는지가 관리자 페이지의 변경 이력에 기록됩니다.</li>
       </ul>
     `)}
     ${manualSection('⛳ 연습장 매출', `
@@ -1322,7 +1299,7 @@ function renderManualView(){
     ${isAdmin() ? manualSection('🛠 관리자 전용 기능', `
       <ul style="margin:0;padding-left:18px;line-height:1.8;">
         <li><b>📊 조회/통계</b> — 월별로 날짜별 매출 합계를 확인할 수 있습니다. 날짜를 클릭하면 해당 일지 편집 화면으로 이동합니다.</li>
-        <li><b>🛠 관리자 페이지</b> — 관리자 비밀번호 변경, 기간별 엑셀 출력(최대 1개월, 날짜별 탭으로 구분), 직원 계정 추가/비밀번호 재설정/삭제, 전체 변경 이력 확인이 가능합니다.</li>
+        <li><b>🛠 관리자 페이지</b> — 관리자 비밀번호 변경, 기간별 엑셀 출력(최대 1개월, 날짜별 탭으로 구분), 직원 계정 추가/비밀번호 재설정/삭제, 변경 이력(예약 카드 저장·삭제) 확인이 가능합니다.</li>
       </ul>
     `) : ''}
   `;
@@ -1699,9 +1676,7 @@ async function deleteDateRow(date){
     return;
   }
   if(!confirm(`${date} 일지를 삭제할까요? 되돌릴 수 없습니다.`)) return;
-  if(log.closed && isAdmin()){
-    addAudit(date, 'ADMIN_EDIT_ON_CLOSED', '관리자가 마감된 일지를 삭제함');
-  }
+  addAudit(date, 'DELETE', '일지 전체 삭제');
   await deleteLogDate(date);
   state.listData.dates = state.listData.dates.filter(d=>d!==date);
   delete state.listData.logsByDate[date];
@@ -1811,21 +1786,46 @@ function renderAdminView(){
       <button class="btn" style="margin-top:6px;" onclick="addStaffAccount()">+ 직원 추가</button>
     </div>
 
+    ${renderAuditSection(audit)}
+  `;
+}
+
+// Paged 변경 이력: AUDIT_PAGE_SIZE rows at a time, newest first.
+function renderAuditSection(audit){
+  const total = audit.length;
+  const pageCount = Math.max(1, Math.ceil(total / AUDIT_PAGE_SIZE));
+  // Clamp in case the list shrank since the page index was last set.
+  const page = Math.min(Math.max(0, state.auditPage), pageCount - 1);
+  state.auditPage = page;
+  const start = page * AUDIT_PAGE_SIZE;
+  const rows = audit.slice(start, start + AUDIT_PAGE_SIZE);
+  return `
     <div class="list-table-wrap">
-      <h2 style="font-size:15px;margin-top:0;">📜 변경 이력 (담당자 교대 · 마감 처리 · 마감 후 수정/삭제 · 비밀번호/계정 변경)</h2>
+      <h2 style="font-size:15px;margin-top:0;">📜 변경 이력 (예약 카드 저장 · 삭제)</h2>
       <table>
-        <tr><th class="label">시각</th><th class="label">날짜</th><th class="label">종류</th><th class="label">내용</th></tr>
-        ${audit.length ? audit.map(a=>`
+        <tr><th class="label">시각</th><th class="label">작업자</th><th class="label">종류</th><th class="label">내용</th></tr>
+        ${rows.length ? rows.map(a=>`
           <tr>
             <td class="label">${new Date(a.ts).toLocaleString('ko-KR')}</td>
-            <td class="label">${escHtml(a.date||'-')}</td>
-            <td class="label">${escHtml(AUDIT_TYPE_LABEL[a.type]||a.type)}</td>
-            <td class="label">${escHtml(a.detail)}</td>
+            <td class="label">${escHtml(a.who || '-')}</td>
+            <td class="label">${escHtml(AUDIT_TYPE_LABEL[a.type] || a.type)}</td>
+            <td class="label">${escHtml(a.detail || '')}</td>
           </tr>
         `).join('') : '<tr><td colspan="4" style="text-align:center;color:#999;">기록 없음</td></tr>'}
       </table>
+      ${total ? `
+        <div class="audit-pager">
+          <button class="btn small" ${page===0?'disabled':''} onclick="gotoAuditPage(${page-1})">← 이전</button>
+          <span>${page+1} / ${pageCount} 페이지 (총 ${total}건)</span>
+          <button class="btn small" ${page>=pageCount-1?'disabled':''} onclick="gotoAuditPage(${page+1})">다음 →</button>
+        </div>
+      ` : ''}
     </div>
   `;
+}
+function gotoAuditPage(p){
+  state.auditPage = p;
+  render();
 }
 
 // ---------- escaping ----------
