@@ -128,6 +128,7 @@
   .collapse-arrow{color:var(--ink-muted);font-size:11px;width:12px;}
   .visit-summary-meta{color:var(--ink-muted);font-size:12px;}
   .unsaved-dot{color:var(--accent);font-size:11px;font-weight:600;white-space:nowrap;margin-left:auto;}
+  .btn.saved-flash{background:var(--cash-bg);border-color:var(--cash);color:#3d6b1a;font-weight:bold;}
 
   .add-visit-btn{width:100%;padding:10px;border:2px dashed var(--line);background:transparent;border-radius:var(--radius-lg);cursor:pointer;color:var(--ink-muted);font-size:13px;}
   .add-visit-btn:hover{background:var(--bg);}
@@ -775,13 +776,40 @@ function markDirty(visitId){
 }
 // Same as markDirty but skips the full render — used by free-text fields
 // (Korean/IME input) where re-rendering per keystroke would destroy the
-// input node and break IME composition.
+// input node and break IME composition. Touches only the few nodes that
+// need to change, never innerHTML, so nothing under the user's finger is
+// swapped out mid-interaction.
 function markDirtyQuiet(visitId){
   if(visitId) dirtyVisits.add(visitId);
+  const card = document.getElementById('visit-' + visitId);
   const btn = document.getElementById('saveBtn-' + visitId);
-  if(btn){ btn.disabled = false; btn.classList.add('primary'); }
+  if(btn){ btn.disabled = false; btn.classList.add('primary'); btn.textContent = '💾 저장'; }
+  if(card && !card.querySelector('.unsaved-dot')){
+    const bar = card.querySelector('.visit-summary-bar');
+    if(bar){
+      const dot = document.createElement('span');
+      dot.className = 'unsaved-dot';
+      dot.textContent = '● 미저장';
+      bar.appendChild(dot);
+    }
+  }
+}
+// Reflects a customer-name edit in the card's summary line without a full
+// re-render (that used to be an onblur="render()", which destroyed the DOM
+// the user was about to click — see saveLogChanges).
+function refreshVisitSummaryName(visitId, name){
+  const el = document.querySelector('#visit-' + visitId + ' .visit-summary-bar b');
+  if(el) el.textContent = name || '(이름 미입력)';
 }
 async function saveLogChanges(){
+  // Runs on pointerdown, i.e. BEFORE the focused field blurs, so first flush
+  // whatever the user was still typing into state.log. Without this the
+  // in-progress value would be lost; and binding on click instead would mean
+  // never running at all when a blur/change handler re-renders the button
+  // out from under the pointer (mousedown and mouseup then land on different
+  // nodes, so no click event is ever produced).
+  const a = document.activeElement;
+  if(a && a !== document.body && typeof a.blur === 'function') a.blur();
   if(!state.log || dirtyVisits.size === 0) return;
   syncStaffOwnership();
   const who = session ? (session.name + (isAdmin() ? ' (관리자)' : '')) : '(미상)';
@@ -794,6 +822,21 @@ async function saveLogChanges(){
   dirtyVisits.clear();
   applyPendingRemote(); // pull in anything that arrived while we were dirty
   render();
+  flashSavedConfirmation();
+}
+// Explicit visible proof the write actually happened — a silently swallowed
+// save is precisely what let earlier data loss go unnoticed.
+function flashSavedConfirmation(){
+  document.querySelectorAll('[id^="saveBtn-"]').forEach(btn=>{
+    btn.textContent = '✔ 저장됨';
+    btn.classList.add('saved-flash');
+  });
+  setTimeout(()=>{
+    document.querySelectorAll('.saved-flash').forEach(btn=>{
+      btn.textContent = '💾 저장';
+      btn.classList.remove('saved-flash');
+    });
+  }, 1500);
 }
 // Guards any navigation away from the currently-open log (date change,
 // leaving to a different date via the list view, closing the tab) so an
@@ -981,7 +1024,9 @@ function focusVisitFromBoard(room, visitId){
 }
 function setCustomer(room, visitId, v){
   if(isBlockedForEdit()) return;
-  getVisit(room, visitId).customer = v; markDirtyQuiet(visitId);
+  getVisit(room, visitId).customer = v;
+  refreshVisitSummaryName(visitId, v);
+  markDirtyQuiet(visitId);
 }
 function setPhone(room, visitId, v){
   if(isBlockedForEdit()) return;
@@ -1445,8 +1490,8 @@ function renderVisitCard(room, v){
         <select ${locked||!v.bookingStart?'disabled':''} onchange="setBookingRange('${room}','${v.id}','end',this.value)">
           ${v.bookingStart ? endTimeOptions(v.bookingStart).map(o=>`<option value="${o}" ${v.bookingEnd===o?'selected':''}>${o}</option>`).join('') : '<option>-</option>'}
         </select>
-        <input type="text" class="customer" placeholder="예약자 이름" value="${escAttr(v.customer)}" ${locked?'disabled':''} oninput="setCustomer('${room}','${v.id}',this.value)" onblur="render()">
-        <input type="tel" class="phone" placeholder="연락처(선택)" value="${escAttr(v.phone||'')}" ${locked?'disabled':''} oninput="setPhone('${room}','${v.id}',this.value)" onblur="render()">
+        <input type="text" class="customer" placeholder="예약자 이름" value="${escAttr(v.customer)}" ${locked?'disabled':''} oninput="setCustomer('${room}','${v.id}',this.value)">
+        <input type="tel" class="phone" placeholder="연락처(선택)" value="${escAttr(v.phone||'')}" ${locked?'disabled':''} oninput="setPhone('${room}','${v.id}',this.value)">
       </div>
 
       <div class="payments">
@@ -1465,7 +1510,7 @@ function renderVisitCard(room, v){
       </div>
 
       <div class="visit-foot">
-        <button class="btn small ${dirty?'primary':''}" id="saveBtn-${v.id}" ${locked||!dirty?'disabled':''} onclick="saveLogChanges()">💾 저장</button>
+        <button class="btn small ${dirty?'primary':''}" id="saveBtn-${v.id}" ${locked?'disabled':''} onpointerdown="event.preventDefault();saveLogChanges()">💾 저장</button>
         <button class="btn small danger" ${locked?'disabled':''} onclick="removeVisit('${room}','${v.id}')">방문 삭제</button>
       </div>
     </div>
