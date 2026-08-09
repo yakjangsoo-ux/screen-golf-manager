@@ -81,8 +81,10 @@
     border:1px solid var(--line);border-radius:var(--radius-md);padding:12px;margin-bottom:10px;background:#fafafa;
   }
   .visit-head{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px;}
-  .visit-head input[type=text]{padding:5px 8px;border:1px solid var(--line);border-radius:var(--radius-sm);font-size:13px;}
-  .visit-head input.customer{flex:1 1 140px;min-width:110px;}
+  .visit-head select, .visit-head input[type=text], .visit-head input[type=tel]{
+    height:30px;box-sizing:border-box;padding:0 8px;border:1px solid var(--line);border-radius:var(--radius-sm);font-size:13px;background:#fff;color:var(--ink);
+  }
+  .visit-head input.customer{flex:0 1 90px;min-width:64px;}
   .visit-head input.phone{flex:1 1 130px;min-width:110px;}
 
   .payments{display:flex;flex-direction:column;gap:6px;margin:8px 0;}
@@ -140,6 +142,9 @@
   .lock-banner{background:#fff3cd;border:1px solid #ffe58a;color:#7a5b00;padding:8px 12px;border-radius:var(--radius-lg);margin-bottom:12px;font-size:13px;}
   .lock-banner.admin-mode{background:#e6f4ff;border-color:#a9d4ff;color:#0b4a8f;}
 
+  .board-card{background:var(--card-white);border:1px solid var(--line);border-radius:var(--radius-lg);margin-bottom:14px;overflow:hidden;}
+  .board-card .date-row{background:transparent;border:none;border-radius:0;margin-bottom:0;border-bottom:1px solid var(--line);}
+  .board-card .board-wrap{border:none;border-radius:0;margin-bottom:0;}
   .board-wrap{overflow-x:auto;background:var(--card-white);border:1px solid var(--line);border-radius:var(--radius-lg);padding:12px;margin-bottom:14px;}
   .board-table{border-collapse:collapse;font-size:11px;user-select:none;}
   .board-table th, .board-table td{border:1px solid var(--line);padding:0;text-align:center;white-space:nowrap;}
@@ -932,7 +937,7 @@ function selectMobileView(key){
 }
 function renderHeader(){
   if(!session){
-    return `<h1>🏌️ 스크린골프 일지 정산</h1>`;
+    return `<h1>🏌️ 대성스크린골프 일지 관리</h1>`;
   }
   const menuItems = [
     { key:'edit', label:'일지 관리', show:true },
@@ -940,9 +945,11 @@ function renderHeader(){
     { key:'admin', label:'관리자 페이지', show:isAdmin() },
     { key:'manual', label:'메뉴얼', show:true },
   ];
+  const headerTitles = { edit:'대성스크린골프 일지 관리', list:'통계/분석', admin:'관리자 페이지', manual:'메뉴얼' };
+  const title = headerTitles[state.view] || '대성스크린골프 일지 관리';
   return `
     <div class="app-header">
-      <h1>🏌️ 스크린골프 일지 정산</h1>
+      <h1>🏌️ ${title}</h1>
       <button class="hamburger-btn ${mobileMenuOpen?'active':''}" onclick="toggleMobileMenu()" aria-label="메뉴">☰</button>
     </div>
     <div class="mobile-drawer-backdrop ${mobileMenuOpen?'open':''}" onclick="closeMobileMenu()"></div>
@@ -1164,19 +1171,20 @@ function renderEditView(){
   const locked = isLocked();
   return `
     ${renderNav()}
-    <div class="topbar date-row">
-      <label>날짜</label>
-      <input type="date" value="${log.date}" onchange="changeDate(this.value)">
-      <span class="weekday">${weekdayLabel(log.date)}요일</span>
-      <span class="method-tag desktop-only-info" style="background:#eef2ff;color:var(--accent);">담당자: ${escHtml(log.staff || session.name)}</span>
-      <div class="spacer"></div>
-      <span class="autosave-badge desktop-only-info" id="lastSavedBadge">${lastSavedAt ? '✔ 마지막 저장 ' + lastSavedAt.toLocaleTimeString('ko-KR') : '자동 저장 대기중'}</span>
-      ${log.closed
-        ? `<span class="method-tag transfer mobile-only-close">🔒 마감됨</span>${isAdmin() ? `<button class="btn small mobile-only-close" onclick="reopenDay()">🔓 마감 취소</button>` : ''}`
-        : `<button class="btn mobile-only-close" onclick="closeDay()">🔒 마감 처리</button>`}
+    <div class="board-card">
+      <div class="topbar date-row">
+        <label>날짜</label>
+        <input type="date" value="${log.date}" onchange="changeDate(this.value)">
+        <span class="weekday">${weekdayLabel(log.date)}요일</span>
+        <span class="method-tag desktop-only-info" style="background:#eef2ff;color:var(--accent);">담당자: ${escHtml(log.staff || session.name)}</span>
+        <div class="spacer"></div>
+        <span class="autosave-badge desktop-only-info" id="lastSavedBadge">${lastSavedAt ? '✔ 마지막 저장 ' + lastSavedAt.toLocaleTimeString('ko-KR') : '자동 저장 대기중'}</span>
+        ${log.closed
+          ? `<span class="method-tag transfer mobile-only-close">🔒 마감됨</span>${isAdmin() ? `<button class="btn small mobile-only-close" onclick="reopenDay()">🔓 마감 취소</button>` : ''}`
+          : `<button class="btn mobile-only-close" onclick="closeDay()">🔒 마감 처리</button>`}
+      </div>
+      ${renderBoard()}
     </div>
-
-    ${renderBoard()}
 
     ${log.closed ? `
       <div class="lock-banner ${isAdmin()?'admin-mode':''}">
@@ -1616,7 +1624,7 @@ function escAttr(s){ return escHtml(s); }
     render();
   }catch(e){
     console.warn('초기 로딩 실패:', e);
-    document.getElementById('header').innerHTML = '<h1>🏌️ 스크린골프 일지 정산</h1>';
+    document.getElementById('header').innerHTML = '<h1>🏌️ 대성스크린골프 일지 관리</h1>';
     document.getElementById('app').innerHTML =
       '<div class="summary"><p>서버에 연결하지 못했습니다. 인터넷 연결을 확인해주세요.</p>' +
       '<button class="btn primary" onclick="location.reload()">다시 시도</button></div>';
