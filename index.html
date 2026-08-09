@@ -159,6 +159,22 @@
     table{font-size:12px;}
     table th, table td{padding:5px 6px;}
   }
+
+  .lbl-short{display:none;}
+  .mobile-bottom-bar{display:none;}
+  @media (max-width: 600px){
+    .lbl-full{display:none;}
+    .lbl-short{display:inline;}
+    .manual-btn{display:none;}
+    .nav-status .identity-inline{display:none;}
+    body{padding-bottom:66px;}
+    .mobile-bottom-bar{
+      display:flex;align-items:center;justify-content:space-between;gap:10px;
+      position:fixed;left:0;right:0;bottom:0;z-index:500;
+      background:var(--card-white);border-top:1px solid var(--line);
+      padding:10px 14px;
+    }
+  }
 </style>
 </head>
 <body>
@@ -916,20 +932,24 @@ function renderNav(){
   return `
     <div class="view-toggle">
       <div class="nav-links">
-        <button class="btn ${state.view==='edit'?'primary':''}" onclick="state.view='edit';render()">✏️ 일지 입력</button>
-        <button class="btn ${state.view==='manual'?'primary':''}" onclick="state.view='manual';render()">📖 사용법</button>
+        <button class="btn ${state.view==='edit'?'primary':''}" onclick="state.view='edit';render()"><span class="lbl-full">✏️ 일지 입력</span><span class="lbl-short">✏️ 일지</span></button>
+        <button class="btn manual-btn ${state.view==='manual'?'primary':''}" onclick="state.view='manual';render()">📖 사용법</button>
         ${isAdmin() ? `
-          <button class="btn ${state.view==='list'?'primary':''}" onclick="openListView()">📊 조회/통계</button>
-          <button class="btn ${state.view==='admin'?'primary':''}" onclick="openAdminView()">🛠 관리자 페이지</button>
+          <button class="btn ${state.view==='list'?'primary':''}" onclick="openListView()"><span class="lbl-full">📊 조회/통계</span><span class="lbl-short">📊 통계</span></button>
+          <button class="btn ${state.view==='admin'?'primary':''}" onclick="openAdminView()"><span class="lbl-full">🛠 관리자 페이지</span><span class="lbl-short">🛠 관리자</span></button>
         ` : ''}
       </div>
       <div class="nav-status">
-        <span class="autosave-badge">👤 ${escHtml(session.name)}${isAdmin()?' (관리자)':''}</span>
         ${log && log.closed
           ? `<span class="method-tag transfer">🔒 마감됨</span>${isAdmin() ? `<button class="btn small" onclick="reopenDay()">🔓 마감 취소</button>` : ''}`
           : `<button class="btn" onclick="closeDay()">🔒 마감 처리</button>`}
-        <button class="btn danger" onclick="logout()">🚪 로그아웃</button>
+        <span class="autosave-badge identity-inline">👤 ${escHtml(session.name)}${isAdmin()?' (관리자)':''}</span>
+        <button class="btn danger identity-inline" onclick="logout()">🚪 로그아웃</button>
       </div>
+    </div>
+    <div class="mobile-bottom-bar">
+      <span class="autosave-badge">👤 ${escHtml(session.name)}${isAdmin()?' (관리자)':''}</span>
+      <button class="btn danger" onclick="logout()">🚪 로그아웃</button>
     </div>
   `;
 }
