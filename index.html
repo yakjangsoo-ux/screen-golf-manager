@@ -211,36 +211,36 @@
   .mobile-drawer-footer{display:flex;flex-direction:column;gap:10px;border-top:1px solid var(--line);padding-top:14px;}
   .mobile-only-close{display:none;}
 
-  @media (max-width: 600px){
-    .lbl-full{display:none;}
-    .lbl-short{display:inline;}
-    .view-toggle{display:none;}
+  /* Unified layout: the drawer/hamburger nav and compact date-row/tabs
+     that used to be mobile-only (<=600px) now apply at every width. */
+  .lbl-full{display:none;}
+  .lbl-short{display:inline;}
+  .view-toggle{display:none;}
 
-    #header{position:fixed;top:0;left:0;right:0;z-index:600;background:#fff;padding:0 var(--body-pad);}
-    body{padding-top:66px;}
-    .app-header{padding:10px 0;position:relative;justify-content:flex-end;}
-    .app-header h1{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);font-size:16px;white-space:nowrap;}
-    .hamburger-btn{
-      display:flex;align-items:center;justify-content:center;flex-shrink:0;
-      width:40px;height:40px;border:none;background:transparent;
-      font-size:24px;line-height:1;color:var(--ink);cursor:pointer;
-    }
-    .hamburger-btn.active{color:var(--accent);}
-    .mobile-drawer-backdrop.open{display:block;position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:899;}
-    .mobile-drawer{display:flex;}
-    .mobile-drawer.open{transform:translateX(0);}
-
-    .date-row{flex-wrap:nowrap;overflow-x:auto;padding:9px 12px;margin-bottom:8px;}
-    .date-row > *{flex-shrink:0;}
-    .date-row input[type=date], .date-row .weekday, .date-row .btn, .date-row .method-tag{
-      height:32px;box-sizing:border-box;display:inline-flex;align-items:center;
-    }
-    .date-row .mobile-only-close{display:inline-flex;}
-    .date-row .desktop-only-info{display:none;}
-
-    .tabs{flex-wrap:nowrap;overflow-x:visible;gap:0;}
-    .tab{flex:1 1 0;text-align:center;padding:9px 2px;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  #header{position:fixed;top:0;left:0;right:0;z-index:600;background:#fff;padding:0 var(--body-pad);}
+  body{padding-top:66px;}
+  .app-header{padding:10px 0;position:relative;justify-content:flex-end;}
+  .app-header h1{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);font-size:16px;white-space:nowrap;}
+  .hamburger-btn{
+    display:flex;align-items:center;justify-content:center;flex-shrink:0;
+    width:40px;height:40px;border:none;background:transparent;
+    font-size:24px;line-height:1;color:var(--ink);cursor:pointer;
   }
+  .hamburger-btn.active{color:var(--accent);}
+  .mobile-drawer-backdrop.open{display:block;position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:899;}
+  .mobile-drawer{display:flex;}
+  .mobile-drawer.open{transform:translateX(0);}
+
+  .date-row{flex-wrap:nowrap;overflow-x:auto;padding:9px 12px;margin-bottom:8px;}
+  .date-row > *{flex-shrink:0;}
+  .date-row input[type=date], .date-row .weekday, .date-row .btn, .date-row .method-tag{
+    height:32px;box-sizing:border-box;display:inline-flex;align-items:center;
+  }
+  .date-row .mobile-only-close{display:inline-flex;}
+  .date-row .desktop-only-info{display:none;}
+
+  .tabs{flex-wrap:nowrap;overflow-x:visible;gap:0;}
+  .tab{flex:1 1 0;text-align:center;padding:9px 2px;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 </style>
 </head>
 <body>
