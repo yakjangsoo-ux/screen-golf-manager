@@ -394,6 +394,23 @@ function saveLog(log){
   // to the server.
   db.collection('logs').doc(log.date).set(log).catch(err=>{ console.warn('일지 저장 실패:', err); markSaveFailed(); });
 }
+let logUnsubscribe = null;
+// Keeps state.log live-synced with Firestore for whichever date is open, so
+// a second tab/device/staff member editing the same date doesn't get
+// silently overwritten by this tab's next save (the previous design only
+// read a date once and then blindly re-saved its in-memory copy every
+// minute — the actual cause behind "내가 추가한 게 갑자기 사라진다").
+function subscribeLog(date){
+  if(logUnsubscribe){ logUnsubscribe(); logUnsubscribe = null; }
+  logUnsubscribe = db.collection('logs').doc(date).onSnapshot(snap=>{
+    if(snap.metadata.hasPendingWrites) return; // this is our own optimistic write echoing back, not a remote change
+    if(state.currentDate !== date || state.view !== 'edit') return; // listener outlived the view/date it was opened for
+    const active = document.activeElement;
+    if(active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) return; // don't clobber an in-progress edit or break IME composition
+    state.log = snap.exists ? normalizeLog(snap.data()) : blankLog(date);
+    render();
+  }, err=>{ console.warn('실시간 동기화 실패:', err); });
+}
 function deleteLogDate(date){
   return db.collection('logs').doc(date).delete();
 }
@@ -608,17 +625,20 @@ let collapsedVisits = new Set(); // UI-only: which visit cards are folded (not p
 let bookingDialog = null; // { room, start } while the board's "new booking" modal is open
 
 let lastSavedAt = null;
+let lastSaveFailed = false;
 // Updates the small "last saved" badge directly via the DOM instead of a
 // full render() — a full render mid-interval could land while the user is
 // composing Korean text and would break IME input.
 function markSaved(){
   lastSavedAt = new Date();
+  lastSaveFailed = false;
   const badge = document.getElementById('lastSavedBadge');
   if(badge){ badge.textContent = '✔ 마지막 저장 ' + lastSavedAt.toLocaleTimeString('ko-KR'); badge.style.color = ''; }
 }
 // A save failed to reach Firestore (e.g. network drop) — flip the badge into
 // a visible warning instead of leaving staff thinking everything saved fine.
 function markSaveFailed(){
+  lastSaveFailed = true;
   const badge = document.getElementById('lastSavedBadge');
   if(badge){ badge.textContent = '⚠ 저장 실패 - 인터넷 연결을 확인하세요'; badge.style.color = 'var(--danger)'; }
 }
@@ -647,12 +667,15 @@ function persistQuiet(){
   saveLog(state.log);
   markSaved();
 }
-// Safety-net autosave: re-persists the current log every minute even if no
-// change event fired, and refreshes the "last saved" badge without a full
-// render (see markSaved).
+// Retry-on-failure safety net only — this used to blindly re-save the
+// in-memory log every minute regardless of whether anything failed, which
+// meant a tab left open on a date someone else was actively editing
+// elsewhere would periodically stomp their changes with its own stale copy
+// (the actual cause behind "내가 추가한 게 갑자기 사라진다"). subscribeLog's
+// realtime listener now keeps state.log fresh instead, so this only needs
+// to retry a save that's actually known to have failed.
 setInterval(()=>{
-  if(state.log) saveLog(state.log);
-  markSaved();
+  if(state.log && lastSaveFailed) saveLog(state.log);
 }, 60000);
 
 // ---------- mutation helpers ----------
@@ -667,6 +690,7 @@ async function changeDate(v){
     const log = await loadLog(v);
     if(myGen !== loadGeneration) return; // superseded by a newer date/view change — don't clobber it
     state.log = log;
+    subscribeLog(v);
   }catch(e){
     if(myGen !== loadGeneration) return;
     alert('일지를 불러오지 못했습니다. 인터넷 연결을 확인하고 다시 시도해주세요.');
@@ -1484,6 +1508,7 @@ async function loadDateIntoEditor(date){
     const log = await loadLog(date); // fresh read, not the list-view snapshot — another device may have changed it since
     if(myGen !== loadGeneration) return;
     state.log = log;
+    subscribeLog(date);
   }catch(e){
     if(myGen !== loadGeneration) return;
     alert('일지를 불러오지 못했습니다. 인터넷 연결을 확인하고 다시 시도해주세요.');
@@ -1647,6 +1672,7 @@ function escAttr(s){ return escHtml(s); }
       if(saved) session = JSON.parse(saved);
     }catch(e){ session = null; }
     state.log = await loadLog(state.currentDate);
+    subscribeLog(state.currentDate);
     render();
   }catch(e){
     console.warn('초기 로딩 실패:', e);
