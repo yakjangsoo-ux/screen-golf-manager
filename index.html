@@ -1262,7 +1262,7 @@ function renderVisitCard(room, v){
     <div class="visit-summary-bar" onclick="toggleVisitCollapse('${v.id}')">
       <span class="collapse-arrow">${collapsed?'▶':'▼'}</span>
       <b>${escHtml(v.customer)||'(이름 미입력)'}</b>
-      <span class="visit-summary-meta">${bookingLabel}${v.phone?` · ☎ ${escHtml(v.phone)}`:''} · 결제 ${fmt(total)}원</span>
+      <span class="visit-summary-meta">${bookingLabel} · 결제 ${fmt(total)}원</span>
     </div>
   `;
   if(collapsed){
