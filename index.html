@@ -637,11 +637,42 @@ function addAudit(date, type, detail){
   db.collection('audit').add({ ts: new Date().toISOString(), date, type, detail, who: auditActor() })
     .catch(err=>console.warn('감사 로그 기록 실패:', err));
 }
-// Bounded read: the table only pages through recent history, so there's no
-// reason to pull the whole collection down every time the page opens.
+// 변경 이력은 1개월치만 보관한다. 기준 시각(그보다 오래된 기록은 삭제 대상).
+// A flat 31 days rather than setMonth(-1): on e.g. 3월 31일 that would
+// overflow "2월 31일" into 3월 3일 and delete entries only ~28 days old.
+// Deletion is irreversible, so round in favour of keeping.
+const AUDIT_RETENTION_DAYS = 31;
+function auditCutoffIso(){
+  return new Date(Date.now() - AUDIT_RETENTION_DAYS * 24 * 60 * 60 * 1000).toISOString();
+}
+// Deletes entries older than the retention window. Runs when an admin opens
+// the page — the only time anyone reads this collection — so retention costs
+// nothing during normal register use. Failure is non-fatal: the table still
+// filters by the cutoff, so stale rows are never shown even if a delete
+// didn't go through (e.g. offline).
+async function pruneOldAudit(){
+  try{
+    const cutoff = auditCutoffIso();
+    const old = await db.collection('audit').where('ts','<',cutoff).limit(400).get();
+    if(old.empty) return 0;
+    // Firestore caps a batch at 500 writes.
+    let batch = db.batch(), n = 0;
+    for(const doc of old.docs){
+      batch.delete(doc.ref);
+      if(++n % 400 === 0){ await batch.commit(); batch = db.batch(); }
+    }
+    if(n % 400 !== 0) await batch.commit();
+    return n;
+  }catch(err){
+    console.warn('오래된 변경 이력 정리 실패:', err);
+    return 0;
+  }
+}
+// Bounded read, and never returns anything past the retention window.
 async function getAudit(){
-  const snap = await db.collection('audit').orderBy('ts','desc').limit(200).get();
-  return snap.docs.map(d=>d.data());
+  const cutoff = auditCutoffIso();
+  const snap = await db.collection('audit').orderBy('ts','desc').limit(400).get();
+  return snap.docs.map(d=>d.data()).filter(a=>a.ts && a.ts >= cutoff);
 }
 // Describes a visit for the audit detail text, e.g. 'R1 홍길동'.
 function visitLabel(room, v){
@@ -1197,6 +1228,7 @@ async function openAdminView(){
   state.auditPage = 0; // always open the 변경 이력 on the newest page
   render();
   try{
+    await pruneOldAudit(); // drop anything past the 1-month window before reading
     const [staffList, audit] = await Promise.all([getStaffList(), getAudit()]);
     if(myGen !== loadGeneration) return;
     state.adminData = { staffList, audit };
@@ -1487,8 +1519,8 @@ function renderVisitCard(room, v){
       </div>
 
       <div class="visit-foot">
-        <button class="btn small ${dirty?'primary':''}" id="saveBtn-${v.id}" ${locked?'disabled':''} onpointerdown="event.preventDefault();saveLogChanges()">💾 저장</button>
         <button class="btn small danger" ${locked?'disabled':''} onclick="removeVisit('${room}','${v.id}')">방문 삭제</button>
+        <button class="btn small ${dirty?'primary':''}" id="saveBtn-${v.id}" ${locked?'disabled':''} onpointerdown="event.preventDefault();saveLogChanges()">💾 저장</button>
       </div>
     </div>
   `;
@@ -1802,6 +1834,7 @@ function renderAuditSection(audit){
   return `
     <div class="list-table-wrap">
       <h2 style="font-size:15px;margin-top:0;">📜 변경 이력 (예약 카드 저장 · 삭제)</h2>
+      <p style="font-size:12px;color:#888;margin:0 0 8px;">최근 1개월치만 보관되며, 그보다 오래된 기록은 자동으로 삭제됩니다.</p>
       <table>
         <tr><th class="label">시각</th><th class="label">작업자</th><th class="label">종류</th><th class="label">내용</th></tr>
         ${rows.length ? rows.map(a=>`
