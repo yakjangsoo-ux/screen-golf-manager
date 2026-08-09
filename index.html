@@ -1424,8 +1424,7 @@ function renderListView(){
       roomMonthTotals[r].transfer += s.roomTotals[r].transfer;
     });
     return `<tr>
-      <td class="label"><a href="#" onclick="loadDateIntoEditor('${d}');return false;">${d} (${weekdayLabel(d)})</a> ${log.closed?'🔒':''}</td>
-      <td class="label">${escHtml(log.staff||'-')}</td>
+      <td class="label"><a href="#" onclick="loadDateIntoEditor('${d}');return false;">${d.slice(5)} (${weekdayLabel(d)})</a> ${log.closed?'🔒':''}</td>
       <td>${fmt(s.totals.cash)}</td><td>${fmt(s.totals.card)}</td><td>${fmt(s.totals.transfer)}</td>
       <td><b>${fmt(s.grandTotal)}</b></td>
       <td class="row-actions">
@@ -1447,9 +1446,9 @@ function renderListView(){
     <div class="list-table-wrap">
       <h2 style="font-size:15px;margin-top:0;">${state.listMonth} 일별 매출</h2>
       <table>
-        <tr><th class="label">날짜</th><th class="label">담당자</th><th>현금</th><th>카드</th><th>이체</th><th>합계</th><th>관리</th></tr>
-        ${rows || '<tr><td colspan="7" style="text-align:center;color:#999;">저장된 일지가 없습니다</td></tr>'}
-        <tr class="grand-row"><td class="label">월 합계</td><td></td><td>${fmt(monthTotals.cash)}</td><td>${fmt(monthTotals.card)}</td><td>${fmt(monthTotals.transfer)}</td><td>${fmt(monthTotals.cash+monthTotals.card+monthTotals.transfer)}</td><td></td></tr>
+        <tr><th class="label">날짜</th><th>현금</th><th>카드</th><th>이체</th><th>합계</th><th>관리</th></tr>
+        ${rows || '<tr><td colspan="6" style="text-align:center;color:#999;">저장된 일지가 없습니다</td></tr>'}
+        <tr class="grand-row"><td class="label">월 합계</td><td>${fmt(monthTotals.cash)}</td><td>${fmt(monthTotals.card)}</td><td>${fmt(monthTotals.transfer)}</td><td>${fmt(monthTotals.cash+monthTotals.card+monthTotals.transfer)}</td><td></td></tr>
       </table>
     </div>
 
