@@ -177,17 +177,28 @@
   .board-card .date-row{background:transparent;border:none;border-radius:0;margin-bottom:0;border-bottom:1px solid var(--line);}
   .board-card .board-wrap{border:none;border-radius:0;margin-bottom:0;}
   .board-wrap{overflow-x:auto;background:var(--card-white);border:1px solid var(--line);border-radius:var(--radius-lg);padding:12px;margin-bottom:14px;}
-  .board-table{border-collapse:collapse;font-size:11px;user-select:none;}
+  /* table-layout:fixed keeps every 30-min column exactly equal and stops the
+     room column from swallowing all the spare width on a wide screen (it used
+     to stretch to ~566px at 1600px while the slots stayed 32px). width:100%
+     lets the time columns take the extra room; the inline min-width keeps
+     them at their readable size and scrolls instead on narrow phones. */
+  .board-table{border-collapse:collapse;font-size:11px;user-select:none;width:100%;table-layout:fixed;}
   .board-table th, .board-table td{border:1px solid var(--line);padding:0;text-align:center;white-space:nowrap;}
   .board-table th{background:var(--bg);padding:4px 3px;font-size:10px;font-weight:normal;color:var(--ink-muted);}
-  .board-room-col{position:sticky;left:0;background:var(--bg);z-index:2;padding:4px 10px !important;text-align:left;font-weight:bold;font-size:12px;}
-  .board-cell{width:32px;height:38px;cursor:pointer;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:0 3px;}
+  .board-room-col{position:sticky;left:0;background:var(--bg);z-index:2;width:56px;padding:4px 10px !important;text-align:left;font-weight:bold;font-size:12px;}
+  .board-cell{height:38px;cursor:pointer;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:0 3px;}
   .board-cell.free{background:#fff;}
   .board-cell.free:hover{background:#eef7e3;}
   .board-cell.free.selecting{background:var(--accent) !important;opacity:0.5;}
+  /* While a touch selection is active, suppress scrolling and the iOS
+     text-selection / callout gestures that would otherwise fight the drag. */
+  body.board-dragging{user-select:none;-webkit-user-select:none;}
+  body.board-dragging .board-wrap{touch-action:none;-webkit-touch-callout:none;}
+  body.board-dragging .board-table{outline:2px solid var(--accent);outline-offset:-2px;}
   .board-cell.occupied{color:#7a2050;font-weight:bold;}
   .board-cell.occupied:hover{filter:brightness(0.93);}
   .board-legend{font-size:11px;color:var(--ink-muted);margin-top:8px;}
+  .board-hint{display:inline-block;margin-left:4px;}
   .board-cell-demo{display:inline-block;width:12px;height:12px;border:1px solid var(--line);vertical-align:middle;margin:0 4px 0 10px;}
   .board-cell-demo:first-child{margin-left:0;}
   .board-cell-demo.free{background:#fff;}
@@ -334,6 +345,11 @@ const BOARD_SLOTS = (()=>{
   }
   return slots;
 })();
+// Width the board needs before its 30-min columns become too narrow to read.
+// Below this the wrapper scrolls horizontally; above it the columns stretch.
+const BOARD_ROOM_COL_PX = 56;
+const BOARD_MIN_SLOT_PX = 32;
+const BOARD_MIN_WIDTH = BOARD_ROOM_COL_PX + BOARD_SLOTS.length * BOARD_MIN_SLOT_PX;
 function slotEnd(slot){
   const [h,m] = slot.split(':').map(Number);
   let nh=h, nm=m+30;
@@ -971,6 +987,71 @@ function extendBoardDrag(room, slot){
   boardDrag.endSlot = slot;
   highlightBoardDrag();
 }
+
+// ----- touch drag -----
+// A finger can't hover, so mouseenter never fires and the mouse path above
+// does nothing on a phone. It also can't just mirror mousedown: the board
+// scrolls horizontally and the page scrolls vertically, so grabbing on
+// touchstart would break both. Resolution: press and hold briefly to enter
+// selection mode (the same gesture used for drag-select elsewhere on mobile),
+// then the finger paints a range. A short tap is untouched and still opens
+// the booking dialog for that single slot.
+const BOARD_TOUCH_HOLD_MS = 350;
+const BOARD_TOUCH_MOVE_TOLERANCE = 12; // px of slop allowed before it counts as a scroll
+let boardTouchHoldTimer = null;
+let boardTouchOrigin = null;   // { x, y, room, slot } between touchstart and hold
+let boardTouchDragging = false;
+function cancelBoardTouchHold(){
+  clearTimeout(boardTouchHoldTimer);
+  boardTouchHoldTimer = null;
+  boardTouchOrigin = null;
+}
+function boardFreeCellAt(x, y){
+  const el = document.elementFromPoint(x, y);
+  if(!el || !el.classList) return null;
+  const cell = el.closest ? el.closest('.board-cell') : null;
+  return (cell && cell.classList.contains('free')) ? cell : null;
+}
+function onBoardTouchStart(e){
+  if(e.touches.length !== 1) return;          // pinch/zoom is not ours
+  const t = e.touches[0];
+  const cell = boardFreeCellAt(t.clientX, t.clientY);
+  if(!cell) return;
+  boardTouchOrigin = { x:t.clientX, y:t.clientY, room:cell.dataset.room, slot:cell.dataset.slot };
+  boardTouchHoldTimer = setTimeout(()=>{
+    if(!boardTouchOrigin) return;
+    boardTouchDragging = true;
+    document.body.classList.add('board-dragging');
+    startBoardDrag(boardTouchOrigin.room, boardTouchOrigin.slot);
+  }, BOARD_TOUCH_HOLD_MS);
+}
+function onBoardTouchMove(e){
+  if(boardTouchDragging){
+    // Non-passive listener: this is what keeps the page/board from scrolling
+    // out from under an active selection.
+    e.preventDefault();
+    const t = e.touches[0];
+    const cell = boardFreeCellAt(t.clientX, t.clientY);
+    if(cell) extendBoardDrag(cell.dataset.room, cell.dataset.slot);
+    return;
+  }
+  // Moved before the hold completed => the user meant to scroll.
+  if(boardTouchOrigin){
+    const t = e.touches[0];
+    if(Math.abs(t.clientX-boardTouchOrigin.x) > BOARD_TOUCH_MOVE_TOLERANCE ||
+       Math.abs(t.clientY-boardTouchOrigin.y) > BOARD_TOUCH_MOVE_TOLERANCE) cancelBoardTouchHold();
+  }
+}
+function onBoardTouchEnd(e){
+  cancelBoardTouchHold();
+  if(!boardTouchDragging) return;             // a plain tap: the emulated click opens the dialog
+  boardTouchDragging = false;
+  document.body.classList.remove('board-dragging');
+  // Suppress the emulated mousedown/mouseup this touch would otherwise
+  // produce — they'd restart the drag and reopen the dialog on one slot.
+  if(e && e.cancelable) e.preventDefault();
+  finishBoardDrag();
+}
 function highlightBoardDrag(){
   document.querySelectorAll('.board-cell.selecting').forEach(el=>el.classList.remove('selecting'));
   if(!boardDrag) return;
@@ -1404,7 +1485,7 @@ function renderBoard(){
   const locked = isLocked();
   return `
     <div class="board-wrap ${locked?'locked-area':''}">
-      <table class="board-table">
+      <table class="board-table" style="min-width:${BOARD_MIN_WIDTH}px;">
         <tr><th class="board-room-col">룸</th>${BOARD_SLOTS.map(s=>`<th>${s.endsWith(':00')?s:''}</th>`).join('')}</tr>
         ${ROOMS.map(room=>{
           const visits = state.log.rooms[room] || [];
@@ -1412,7 +1493,10 @@ function renderBoard(){
           return `<tr><td class="board-room-col">${ROOM_LABEL[room]||room}</td>${renderBoardRow(room, visits, c.label)}</tr>`;
         }).join('')}
       </table>
-      <div class="board-legend"><span class="board-cell-demo free"></span>예약 가능<span class="board-cell-demo occupied"></span>예약됨</div>
+      <div class="board-legend">
+        <span class="board-cell-demo free"></span>예약 가능<span class="board-cell-demo occupied"></span>예약됨
+        <span class="board-hint">· 빈 칸을 <b>길게 누른 뒤 끌면</b> 시간대를 한 번에 선택할 수 있습니다</span>
+      </div>
     </div>
     ${renderBookingDialog()}
   `;
@@ -1955,6 +2039,13 @@ function escAttr(s){ return escHtml(s); }
       '<button class="btn primary" onclick="location.reload()">다시 시도</button></div>';
   }
   document.addEventListener('mouseup', ()=>{ if(boardDrag) finishBoardDrag(); });
+  // Bound on document (not per-cell) so they survive every re-render.
+  // touchmove MUST be non-passive: preventDefault() there is what stops the
+  // page and the board from scrolling while a selection is being dragged.
+  document.addEventListener('touchstart', onBoardTouchStart, { passive: true });
+  document.addEventListener('touchmove',  onBoardTouchMove,  { passive: false });
+  document.addEventListener('touchend',   onBoardTouchEnd);
+  document.addEventListener('touchcancel', onBoardTouchEnd);
 })();
 </script>
 </body>
