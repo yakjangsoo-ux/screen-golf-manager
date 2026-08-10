@@ -136,6 +136,10 @@
   .practice-section{background:var(--card-white);border:1px solid var(--line);border-radius:var(--radius-lg);padding:14px;margin-bottom:18px;}
   .practice-row{display:flex;gap:8px;align-items:center;margin-bottom:6px;flex-wrap:wrap;}
   .practice-row input.amount{flex:0 1 100px;min-width:70px;padding:5px 6px;border:1px solid var(--line);border-radius:var(--radius-sm);text-align:right;}
+  .practice-head{display:flex;align-items:center;gap:8px;}
+  .practice-head .unsaved-dot{margin-left:0;}
+  .practice-foot{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:6px;}
+  .practice-warn:empty{display:none;}
   .warn{color:#c9750c;font-size:11px;}
 
   .summary{background:var(--card-white);border:1px solid var(--line);border-radius:var(--radius-lg);padding:16px;overflow-x:auto;}
@@ -802,9 +806,12 @@ async function persistAndRender(){
 }
 // Which visits hold edits that haven't been committed yet. Per-visit rather
 // than one global flag so each room card's 저장 button can show whether that
-// particular card has something to save.
+// particular card has something to save. 연습장 매출 rows are tracked the same
+// way in their own set, so that section behaves identically.
 const dirtyVisits = new Set();
-function hasUnsavedChanges(){ return dirtyVisits.size > 0; }
+const dirtyPractice = new Set();
+function hasUnsavedChanges(){ return dirtyVisits.size > 0 || dirtyPractice.size > 0; }
+function clearDirty(){ dirtyVisits.clear(); dirtyPractice.clear(); }
 function markDirty(visitId){
   if(visitId) dirtyVisits.add(visitId);
   render();
@@ -845,10 +852,10 @@ async function saveLogChanges(){
   // nodes, so no click event is ever produced).
   const a = document.activeElement;
   if(a && a !== document.body && typeof a.blur === 'function') a.blur();
-  if(!state.log || dirtyVisits.size === 0) return;
+  if(!state.log || !hasUnsavedChanges()) return;
   syncStaffOwnership();
-  // Capture which cards are being saved before commitLog() replaces state.log
-  // with the merged result and the dirty set is cleared.
+  // Capture what is being saved before commitLog() replaces state.log with
+  // the merged result and the dirty sets are cleared.
   const saved = [];
   dirtyVisits.forEach(id=>{
     for(const r of ROOMS){
@@ -856,13 +863,14 @@ async function saveLogChanges(){
       if(v){ saved.push(visitLabel(r, v)); break; }
     }
   });
+  if(dirtyPractice.size) saved.push(`연습장 매출 ${dirtyPractice.size}건`);
   const ok = await commitLog();
   if(!ok){
     alert('저장하지 못했습니다. 인터넷 연결을 확인한 뒤 다시 저장해주세요.');
     return; // keep the draft (and its dirty markers) so the user can retry
   }
   addAudit(state.log.date, 'SAVE', saved.length ? saved.join(', ') : '예약 카드');
-  dirtyVisits.clear();
+  clearDirty();
   applyPendingRemote(); // pull in anything that arrived while we were dirty
   render();
   flashSavedConfirmation();
@@ -885,11 +893,11 @@ function flashSavedConfirmation(){
 // leaving to a different date via the list view, closing the tab) so an
 // unsaved draft is never silently discarded.
 function confirmDiscardIfDirty(){
-  if(dirtyVisits.size === 0) return true;
+  if(!hasUnsavedChanges()) return true;
   return confirm('저장하지 않은 변경사항이 있습니다. 저장하지 않고 이동하면 변경사항이 사라집니다. 계속할까요?');
 }
 window.addEventListener('beforeunload', e=>{
-  if(dirtyVisits.size > 0){ e.preventDefault(); e.returnValue = ''; }
+  if(hasUnsavedChanges()){ e.preventDefault(); e.returnValue = ''; }
 });
 // Retry-on-failure safety net only — never a blind periodic re-save, which
 // is how a tab left open on a stale copy used to stomp other devices' work.
@@ -907,7 +915,7 @@ document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) applyPe
 // (all mutations respect isLocked()/guardEdit() — see "day close / lock" section above)
 async function changeDate(v){
   if(!confirmDiscardIfDirty()){ render(); return; } // render() resets the <input type=date> back to state.currentDate
-  dirtyVisits.clear();
+  clearDirty();
   const myGen = ++loadGeneration;
   const prevDate = state.currentDate, prevLog = state.log;
   state.currentDate = v;
@@ -1077,7 +1085,6 @@ function addPayment(room, visitId){
   v.payments.push({ id:uid(), type:'GAME', method:'cash', amount:0, memo:'' });
   markDirty(visitId);
 }
-const FIELD_LABEL = { amount:'금액', method:'결제수단', type:'항목 종류' };
 // Field edits aren't audited individually — only the 저장 that commits them
 // (and deletions) are recorded, so the 변경 이력 stays readable.
 function updatePayment(room, visitId, payId, field, value){
@@ -1112,26 +1119,54 @@ function addPractice(){
   state.log.practice.push({ id:uid(), amount:0, method:'cash' });
   persistAndRender();
 }
+// Like the room cards: edits are drafts until 저장 is pressed. No
+// confirm-before-overwrite prompt, since 저장 is the deliberate commit.
 function updatePractice(id, field, value){
   if(!guardEdit()) return;
   const p = state.log.practice.find(p=>p.id===id);
-  const newVal = field==='amount' ? (Number(value)||0) : value;
-  const hadValue = (Number(p.amount)||0) !== 0;
-  const changed = p[field] !== newVal;
-  if(hadValue && changed){
-    if(!confirm(`이미 입력된 ${FIELD_LABEL[field]}을(를) 수정하시겠습니까?`)){
-      render();
-      return;
+  p[field] = field==='amount' ? (Number(value)||0) : value;
+  markPracticeDirty(id);
+}
+// Per-keystroke variant: updates state and the range warning without a full
+// re-render, so typing (and IME composition) isn't interrupted and nothing
+// under the user's pointer gets swapped out.
+function updatePracticeQuiet(id, field, value){
+  if(isBlockedForEdit()) return;
+  const p = state.log.practice.find(p=>p.id===id);
+  p[field] = field==='amount' ? (Number(value)||0) : value;
+  const warn = document.querySelector('#practice-' + id + ' .practice-warn');
+  if(warn) warn.textContent = practiceWarning(p.amount);
+  markPracticeDirty(id, true);
+}
+function practiceWarning(amount){
+  const n = Number(amount)||0;
+  return (n > 0 && (n < 10000 || n > 15000)) ? '⚠ 일반 범위(10,000~15,000)를 벗어남 - 확인 필요' : '';
+}
+function markPracticeDirty(id, quiet){
+  if(id) dirtyPractice.add(id);
+  if(quiet){
+    const btn = document.getElementById('saveBtn-practice');
+    if(btn){ btn.classList.add('primary'); btn.textContent = '💾 저장'; }
+    // Same targeted approach as the visit cards: create the marker rather
+    // than keeping an empty one in the DOM at all times.
+    const head = document.querySelector('.practice-head');
+    if(head && !head.querySelector('.unsaved-dot')){
+      const dot = document.createElement('span');
+      dot.className = 'unsaved-dot';
+      dot.id = 'practiceUnsaved';
+      dot.textContent = '● 미저장';
+      head.appendChild(dot);
     }
+    return;
   }
-  p[field] = newVal;
-  persistAndRender();
+  render();
 }
 function removePractice(id){
   if(!guardEdit()) return;
   if(!confirm('이 연습장 매출 항목을 삭제할까요?')) return;
   state.log.practice = state.log.practice.filter(p=>p.id!==id);
-  persistAndRender();
+  dirtyPractice.delete(id); // its row (and any pending edit) is gone
+  persistAndRender();       // structural, like 방문 삭제
 }
 
 // ---------- calculations ----------
@@ -1607,22 +1642,29 @@ function renderAllRoomsTable(){
 function renderPracticeSection(){
   const list = state.log.practice || [];
   const locked = isLocked();
+  const dirty = dirtyPractice.size > 0;
   return `
     <div class="practice-section">
-      <b>연습장 매출</b>
+      <div class="practice-head">
+        <b>연습장 매출</b>
+        ${dirty?'<span class="unsaved-dot" id="practiceUnsaved">● 미저장</span>':''}
+      </div>
       <div class="${locked?'locked-area':''}" style="margin-top:8px;">
         ${list.map(p=>`
-          <div class="practice-row">
+          <div class="practice-row" id="practice-${p.id}">
             <div class="method-btns">
               ${METHODS.map(m=>`<div class="method-btn ${m.key} ${p.method===m.key?'active':''}" onclick="updatePractice('${p.id}','method','${m.key}')">${m.label}</div>`).join('')}
             </div>
-            <input class="amount" type="number" min="0" step="500" value="${p.amount}" onchange="updatePractice('${p.id}','amount',this.value)"> 원
-            ${(p.amount<10000||p.amount>15000) && p.amount>0 ? '<span class="warn">⚠ 일반 범위(10,000~15,000)를 벗어남 - 확인 필요</span>' : ''}
+            <input class="amount" type="number" min="0" step="500" value="${p.amount}" ${locked?'disabled':''} oninput="updatePracticeQuiet('${p.id}','amount',this.value)"> 원
+            <span class="warn practice-warn">${practiceWarning(p.amount)}</span>
             <span class="x" style="cursor:pointer;color:#888;" onclick="removePractice('${p.id}')">✕</span>
           </div>
         `).join('')}
       </div>
-      <button class="btn small" ${locked?'disabled':''} onclick="addPractice()">+ 연습장 매출 추가</button>
+      <div class="practice-foot">
+        <button class="btn small" ${locked?'disabled':''} onclick="addPractice()">+ 연습장 매출 추가</button>
+        <button class="btn small ${dirty?'primary':''}" id="saveBtn-practice" ${locked?'disabled':''} onpointerdown="event.preventDefault();saveLogChanges()">💾 저장</button>
+      </div>
     </div>
   `;
 }
@@ -1703,7 +1745,7 @@ function renderListView(){
 
 async function loadDateIntoEditor(date){
   if(!confirmDiscardIfDirty()) return;
-  dirtyVisits.clear();
+  clearDirty();
   const myGen = ++loadGeneration;
   state.currentDate = date;
   state.log = null;
