@@ -161,6 +161,13 @@
   .locked-area{opacity:0.55;pointer-events:none;}
   .lock-banner{background:#fff3cd;border:1px solid #ffe58a;color:#7a5b00;padding:8px 12px;border-radius:var(--radius-lg);margin-bottom:12px;font-size:13px;}
   .lock-banner.admin-mode{background:#e6f4ff;border-color:#a9d4ff;color:#0b4a8f;}
+  .save-error-banner{
+    display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+    background:#fdeceb;border:1px solid var(--danger);color:#8a2018;
+    padding:10px 12px;border-radius:var(--radius-lg);margin-bottom:12px;font-size:13px;line-height:1.5;
+  }
+  .save-error-banner span{flex:1 1 220px;}
+  .save-error-banner .btn{flex:0 0 auto;border-color:var(--danger);color:var(--danger);font-weight:600;}
 
   .board-card{background:var(--card-white);border:1px solid var(--line);border-radius:var(--radius-lg);margin-bottom:14px;overflow:hidden;}
   .board-card .date-row{background:transparent;border:none;border-radius:0;margin-bottom:0;border-bottom:1px solid var(--line);}
@@ -248,7 +255,6 @@
     height:32px;box-sizing:border-box;display:inline-flex;align-items:center;
   }
   .date-row .mobile-only-close{display:inline-flex;}
-  .date-row .desktop-only-info{display:none;}
 
   .tabs{flex-wrap:nowrap;overflow-x:visible;gap:0;}
   .tab{flex:1 1 0;text-align:center;padding:9px 2px;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
@@ -743,22 +749,35 @@ let collapsedVisits = new Set(); // UI-only: which visit cards are folded (not p
 let bookingDialog = null; // { room, start } while the board's "new booking" modal is open
 
 let lastSavedAt = null;
+// Save state is rendered from here, never poked into the DOM directly: a
+// DOM-only warning was wiped by the very next render() and, worse, lived in
+// an element that had ended up display:none at every width — so a failed
+// save showed the user nothing at all.
 let lastSaveFailed = false;
-// Updates the small "last saved" badge directly via the DOM instead of a
-// full render() — a full render mid-interval could land while the user is
-// composing Korean text and would break IME input.
 function markSaved(){
   lastSavedAt = new Date();
   lastSaveFailed = false;
-  const badge = document.getElementById('lastSavedBadge');
-  if(badge){ badge.textContent = '✔ 마지막 저장 ' + lastSavedAt.toLocaleTimeString('ko-KR'); badge.style.color = ''; }
 }
-// A save failed to reach Firestore (e.g. network drop) — flip the badge into
-// a visible warning instead of leaving staff thinking everything saved fine.
 function markSaveFailed(){
   lastSaveFailed = true;
-  const badge = document.getElementById('lastSavedBadge');
-  if(badge){ badge.textContent = '⚠ 저장 실패 - 인터넷 연결을 확인하세요'; badge.style.color = 'var(--danger)'; }
+}
+// Shown at the top of the editor while the last write is known to have
+// failed, so work that only exists on screen can't be mistaken for saved.
+function renderSaveErrorBanner(){
+  if(!lastSaveFailed) return '';
+  return `
+    <div class="save-error-banner">
+      <span>⚠ 저장하지 못했습니다. 화면의 내용이 아직 서버에 반영되지 않았습니다 — 인터넷 연결을 확인한 뒤 다시 저장해주세요.</span>
+      <button class="btn small" onpointerdown="event.preventDefault();retryFailedSave()">다시 저장</button>
+    </div>
+  `;
+}
+async function retryFailedSave(){
+  if(!state.log) return;
+  const ok = await commitLog();
+  render();
+  if(ok) flashSavedConfirmation();
+  else alert('아직 저장되지 않았습니다. 인터넷 연결을 확인해주세요.');
 }
 // Whoever is logged in as staff and actually edits a day's log becomes its
 // recorded 담당자 — this replaces manually typing a name.
@@ -774,8 +793,12 @@ function syncStaffOwnership(){
 async function persistAndRender(){
   syncStaffOwnership();
   render();              // show the change immediately, don't wait on the round-trip
-  await commitLog();
+  const ok = await commitLog();
   render();              // re-render on the merged result the server actually holds
+  // These paths have no 저장 button to report through, so a failure here used
+  // to be completely silent: the card appeared on screen while nothing had
+  // reached the server. Say so plainly.
+  if(!ok) alert('저장하지 못했습니다. 화면에는 반영됐지만 서버에는 저장되지 않았습니다.\n인터넷 연결을 확인한 뒤 상단의 "다시 저장"을 눌러주세요.');
 }
 // Which visits hold edits that haven't been committed yet. Per-visit rather
 // than one global flag so each room card's 저장 button can show whether that
@@ -1198,6 +1221,11 @@ function renderHeader(){
       </div>
       <div class="mobile-drawer-footer">
         <span class="autosave-badge">👤 ${escHtml(session.name)}${isAdmin()?' (관리자)':''}</span>
+        ${state.log ? `<span class="autosave-badge">🗒 담당자: ${escHtml(state.log.staff || session.name)}</span>` : ''}
+        <span class="autosave-badge" style="${lastSaveFailed?'color:var(--danger);font-weight:600;':''}">${
+          lastSaveFailed ? '⚠ 저장 실패 - 인터넷 연결 확인'
+          : (lastSavedAt ? '✔ 마지막 저장 ' + lastSavedAt.toLocaleTimeString('ko-KR') : '아직 저장한 내용 없음')
+        }</span>
         <button class="btn danger" onclick="closeMobileMenu();logout()">🚪 로그아웃</button>
       </div>
     </div>
@@ -1412,13 +1440,12 @@ function renderEditView(){
   const locked = isLocked();
   return `
     ${renderNav()}
+    ${renderSaveErrorBanner()}
     <div class="board-card">
       <div class="topbar date-row">
         <input type="date" value="${log.date}" onchange="changeDate(this.value)">
         <span class="weekday">${weekdayLabel(log.date)}요일</span>
-        <span class="method-tag desktop-only-info" style="background:#eef2ff;color:var(--accent);">담당자: ${escHtml(log.staff || session.name)}</span>
         <div class="spacer"></div>
-        <span class="autosave-badge desktop-only-info" id="lastSavedBadge">${lastSavedAt ? '✔ 마지막 저장 ' + lastSavedAt.toLocaleTimeString('ko-KR') : '자동 저장 대기중'}</span>
         ${log.closed
           ? (isAdmin()
               ? `<button class="btn mobile-only-close" onclick="reopenDay()">🔓 마감 취소</button>`
