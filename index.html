@@ -178,11 +178,11 @@
   .board-card .board-wrap{border:none;border-radius:0;margin-bottom:0;}
   .board-wrap{overflow-x:auto;background:var(--card-white);border:1px solid var(--line);border-radius:var(--radius-lg);padding:12px;margin-bottom:14px;}
   /* table-layout:fixed keeps every 30-min column exactly equal and stops the
-     room column from swallowing all the spare width on a wide screen (it used
-     to stretch to ~566px at 1600px while the slots stayed 32px). width:100%
-     lets the time columns take the extra room; the inline min-width keeps
-     them at their readable size and scrolls instead on narrow phones. */
-  .board-table{border-collapse:collapse;font-size:11px;user-select:none;width:100%;table-layout:fixed;}
+     room column from swallowing all the spare width (it used to stretch to
+     ~566px at 1600px while the slots stayed 32px). The board keeps its
+     natural width here — stretching to fill is desktop-only, see the
+     min-width:601px block. --board-min is set inline from the slot count. */
+  .board-table{border-collapse:collapse;font-size:11px;user-select:none;table-layout:fixed;width:var(--board-min);}
   .board-table th, .board-table td{border:1px solid var(--line);padding:0;text-align:center;white-space:nowrap;}
   .board-table th{background:var(--bg);padding:4px 3px;font-size:10px;font-weight:normal;color:var(--ink-muted);}
   .board-room-col{position:sticky;left:0;background:var(--bg);z-index:2;width:56px;padding:4px 10px !important;text-align:left;font-weight:bold;font-size:12px;}
@@ -287,6 +287,10 @@
     .pay-row .amount-wrap{flex:0 0 130px;}
     .pay-row input.memo{flex:1 1 auto;min-width:0;}
     .pay-row .x{flex:0 0 auto;}
+
+    /* Only a real monitor gets the stretched board — on a phone the slots
+       stay at their natural size and the wrapper scrolls instead. */
+    .board-table{width:100%;min-width:var(--board-min);}
   }
 </style>
 </head>
@@ -1485,7 +1489,7 @@ function renderBoard(){
   const locked = isLocked();
   return `
     <div class="board-wrap ${locked?'locked-area':''}">
-      <table class="board-table" style="min-width:${BOARD_MIN_WIDTH}px;">
+      <table class="board-table" style="--board-min:${BOARD_MIN_WIDTH}px;">
         <tr><th class="board-room-col">룸</th>${BOARD_SLOTS.map(s=>`<th>${s.endsWith(':00')?s:''}</th>`).join('')}</tr>
         ${ROOMS.map(room=>{
           const visits = state.log.rooms[room] || [];
@@ -1699,15 +1703,10 @@ function renderAllRoomsTable(){
   ROOMS.forEach(room=>{
     (state.log.rooms[room]||[]).forEach(v=>{
       const total = v.payments.reduce((s,p)=>s+(Number(p.amount)||0), 0);
-      const paymentsText = v.payments.length
-        ? v.payments.map(p=>`${payTypeLabel(p.type)} ${fmt(p.amount)}원(${methodLabel(p.method)})${p.memo?` - ${escHtml(p.memo)}`:''}`).join('<br>')
-        : '<span style="color:#bbb;">-</span>';
       rows.push(`<tr>
         <td class="label">${ROOM_LABEL[room]||room}</td>
         <td class="label">${v.bookingStart ? `${v.bookingStart}~${v.bookingEnd}` : '-'}</td>
         <td class="label">${escHtml(v.customer)||'-'}</td>
-        <td class="label">${v.phone ? escHtml(v.phone) : '-'}</td>
-        <td class="label">${paymentsText}</td>
         <td><b>${fmt(total)}</b>원</td>
       </tr>`);
     });
@@ -1716,8 +1715,8 @@ function renderAllRoomsTable(){
     <div class="list-table-wrap">
       <h2 style="font-size:15px;margin-top:0;">전체 룸 — 방문별 결제 내역</h2>
       <table>
-        <tr><th class="label">룸</th><th class="label">시간</th><th class="label">예약자</th><th class="label">연락처</th><th class="label">결제 내역</th><th>방문 합계</th></tr>
-        ${rows.join('') || '<tr><td colspan="6" style="text-align:center;color:#999;">입력된 방문이 없습니다</td></tr>'}
+        <tr><th class="label">룸</th><th class="label">시간</th><th class="label">예약자</th><th>결제 합계</th></tr>
+        ${rows.join('') || '<tr><td colspan="4" style="text-align:center;color:#999;">입력된 방문이 없습니다</td></tr>'}
       </table>
     </div>
   `;
