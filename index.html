@@ -1414,14 +1414,15 @@ function renderEditView(){
     ${renderNav()}
     <div class="board-card">
       <div class="topbar date-row">
-        <label>날짜</label>
         <input type="date" value="${log.date}" onchange="changeDate(this.value)">
         <span class="weekday">${weekdayLabel(log.date)}요일</span>
         <span class="method-tag desktop-only-info" style="background:#eef2ff;color:var(--accent);">담당자: ${escHtml(log.staff || session.name)}</span>
         <div class="spacer"></div>
         <span class="autosave-badge desktop-only-info" id="lastSavedBadge">${lastSavedAt ? '✔ 마지막 저장 ' + lastSavedAt.toLocaleTimeString('ko-KR') : '자동 저장 대기중'}</span>
         ${log.closed
-          ? `<span class="method-tag transfer mobile-only-close">🔒 마감됨</span>${isAdmin() ? `<button class="btn small mobile-only-close" onclick="reopenDay()">🔓 마감 취소</button>` : ''}`
+          ? (isAdmin()
+              ? `<button class="btn mobile-only-close" onclick="reopenDay()">🔓 마감 취소</button>`
+              : `<span class="method-tag transfer mobile-only-close">🔒 마감됨</span>`)
           : `<button class="btn mobile-only-close" onclick="closeDay()">🔒 마감 처리</button>`}
       </div>
       ${renderBoard()}
@@ -1450,7 +1451,6 @@ function renderRoomPanel(room, summary){
   return `
     <div class="room-panel">
       <div class="room-summary">
-        <span>이 방 소계 —</span>
         <span><span class="method-tag cash">현금</span> <b>${fmt(rt.cash)}</b>원</span>
         <span><span class="method-tag card">카드</span> <b>${fmt(rt.card)}</b>원</span>
         <span><span class="method-tag transfer">이체</span> <b>${fmt(rt.transfer)}</b>원</span>
