@@ -81,6 +81,7 @@
     border:1px solid var(--line);border-radius:var(--radius-md);padding:12px;margin-bottom:10px;background:#fafafa;
   }
   .visit-head{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px;}
+  .booking-time-label{font-size:12px;color:#888;}
   .visit-head select, .visit-head input[type=text], .visit-head input[type=tel]{
     height:30px;box-sizing:border-box;padding:0 8px;border:1px solid var(--line);border-radius:var(--radius-sm);font-size:13px;background:#fff;color:var(--ink);
   }
@@ -291,6 +292,39 @@
     /* Only a real monitor gets the stretched board — on a phone the slots
        stay at their natural size and the wrapper scrolls instead. */
     .board-table{width:100%;min-width:var(--board-min);}
+  }
+
+  /* iOS Safari zooms the whole page in whenever a focused field's text is
+     smaller than 16px, and every control here was 12–14px. Raising them to
+     16px on touch devices is the only fix that doesn't disable pinch-zoom
+     (maximum-scale / user-scalable=no would, and that's an accessibility
+     regression). Listed per selector so each beats the earlier rule it
+     overrides; desktop keeps the smaller, denser text. */
+  @media (pointer: coarse), (max-width: 600px){
+    .topbar input[type=date], .topbar input[type=text],
+    .visit-head select, .visit-head input[type=text], .visit-head input[type=tel],
+    .pay-row select, .pay-row input,
+    .birdie-stepper input,
+    .practice-row input.amount,
+    .modal-box input, .modal-box select,
+    .login-box input,
+    select.month-select{
+      font-size:16px;
+    }
+    /* 16px text needs a taller box than these were built for. */
+    .visit-head select, .visit-head input[type=text], .visit-head input[type=tel],
+    .pay-row select, .pay-row input{height:34px;}
+    .birdie-stepper input{height:28px;width:44px;}
+    .birdie-stepper button{width:28px;font-size:16px;}
+    .practice-row input.amount{padding:6px;}
+    /* At 16px the full label no longer fits on the 예약 시간 line, which broke
+       the row into three. The board linkage is explained in 메뉴얼 anyway. */
+    .lbl-board-link{display:none;}
+    /* Widen the paired column so the longest 항목 종류 still reads, keeping the
+       name field and the pay-type select on the same right edge. */
+    .pay-row{grid-template-columns:150px 1fr;}
+    .visit-head input.customer{flex:0 0 150px;}
+    .pay-row .amount-wrap{grid-column:1;}
   }
 </style>
 </head>
@@ -1640,7 +1674,7 @@ function renderVisitCard(room, v){
     <div class="visit-card" id="visit-${v.id}">
       ${summaryBar}
       <div class="visit-head">
-        <label style="font-size:12px;color:#888;">예약 시간(상황판 연동):</label>
+        <label class="booking-time-label">예약 시간<span class="lbl-board-link">(상황판 연동)</span>:</label>
         <select ${locked?'disabled':''} onchange="setBookingRange('${room}','${v.id}','start',this.value)">
           <option value="" ${!v.bookingStart?'selected':''}>미지정</option>
           ${BOARD_SLOTS.map(s=>`<option value="${s}" ${v.bookingStart===s?'selected':''}>${s}</option>`).join('')}
