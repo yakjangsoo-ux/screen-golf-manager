@@ -127,8 +127,14 @@
   .visit-summary-bar{display:flex;align-items:center;gap:8px;cursor:pointer;padding:4px 2px;border-radius:var(--radius-sm);margin-bottom:4px;}
   .visit-summary-bar:hover{background:var(--bg);}
   .collapse-arrow{color:var(--ink-muted);font-size:11px;width:12px;}
-  .visit-summary-meta{color:var(--ink-muted);font-size:12px;}
+  .visit-summary-bar b{white-space:nowrap;flex-shrink:0;}
+  .visit-summary-meta{color:var(--ink-muted);font-size:12px;min-width:0;overflow:hidden;text-overflow:ellipsis;}
   .unsaved-dot{color:var(--accent);font-size:11px;font-weight:600;white-space:nowrap;margin-left:auto;}
+  .group-tag{font-size:11px;font-weight:600;color:var(--accent);background:#eef2ff;border-radius:var(--radius-pill);padding:2px 8px;white-space:nowrap;flex-shrink:0;}
+  .room-picker{display:flex;flex-wrap:wrap;gap:6px;}
+  .room-pick{display:inline-flex;align-items:center;gap:4px;border:1px solid var(--line);border-radius:var(--radius-pill);padding:4px 10px;font-size:13px;cursor:pointer;background:#fff;}
+  .room-pick.on{background:#eef2ff;border-color:var(--accent);color:var(--accent);font-weight:600;}
+  .room-pick input{margin:0;}
   .btn.saved-flash{background:var(--cash-bg);border-color:var(--cash);color:#3d6b1a;font-weight:bold;}
 
   .add-visit-btn{width:100%;padding:10px;border:2px dashed var(--line);background:transparent;border-radius:var(--radius-lg);cursor:pointer;color:var(--ink-muted);font-size:13px;}
@@ -1028,15 +1034,56 @@ function addVisit(room){
 }
 function removeVisit(room, visitId){
   if(!guardEdit()) return;
-  if(!confirm('이 방문 기록을 삭제할까요?')) return;
   const v = getVisit(room, visitId);
-  addAudit(state.log.date, 'DELETE', `${visitLabel(room, v)} 방문 삭제`);
-  state.log.rooms[room] = state.log.rooms[room].filter(v=>v.id!==visitId);
-  dirtyVisits.delete(visitId); // its card (and 저장 button) is gone
+  const linked = linkedVisits(room, visitId);
+  const multi = linked.length > 1;
+  const question = multi
+    ? `이 예약은 ${linked.map(m=>ROOM_LABEL[m.room]||m.room).join('·')} 을(를) 함께 쓰는 예약입니다.\n${linked.length}개 방의 기록이 모두 삭제됩니다. 계속할까요?`
+    : '이 방문 기록을 삭제할까요?';
+  if(!confirm(question)) return;
+  addAudit(state.log.date, 'DELETE',
+    `${multi ? linked.map(m=>ROOM_LABEL[m.room]||m.room).join('·') + ' ' + ((v && v.customer) || '이름없음') : visitLabel(room, v)} 방문 삭제`);
+  linked.forEach(({room:r, v:m})=>{
+    state.log.rooms[r] = state.log.rooms[r].filter(x=>x.id!==m.id);
+    dirtyVisits.delete(m.id); // its card (and 저장 button) is gone
+  });
   persistAndRender();
 }
 function getVisit(room, visitId){
   return state.log.rooms[room].find(v=>v.id===visitId);
+}
+
+// ---------- multi-room bookings ----------
+// One party taking two rooms is stored as one visit per room sharing a
+// groupId. Keeping them as separate visits means the board, the room tabs and
+// the per-room totals all keep working unchanged; the groupId is what ties
+// them together for editing and for splitting the money across rooms.
+function groupMembers(groupId){
+  if(!groupId) return [];
+  const out = [];
+  ROOMS.forEach(r=>{                       // ROOMS order keeps this stable
+    (state.log.rooms[r]||[]).forEach(v=>{ if(v.groupId === groupId) out.push({ room:r, v }); });
+  });
+  return out;
+}
+// Every visit that moves together with this one — itself when ungrouped.
+function linkedVisits(room, visitId){
+  const v = getVisit(room, visitId);
+  if(!v) return [];
+  if(!v.groupId) return [{ room, v }];
+  const members = groupMembers(v.groupId);
+  return members.length ? members : [{ room, v }];
+}
+function groupRoomsLabel(groupId){
+  return groupMembers(groupId).map(m=>ROOM_LABEL[m.room]||m.room).join('·');
+}
+// Splits an integer amount into n whole parts that still add up exactly, so
+// the room rows never drift a won away from the day's total.
+function splitAmount(total, n){
+  const sign = total < 0 ? -1 : 1;
+  const abs = Math.abs(Math.round(total));
+  const base = Math.floor(abs / n), rem = abs % n;
+  return Array.from({length:n}, (_,i)=> sign * (base + (i < rem ? 1 : 0)));
 }
 
 // ---------- board (occupancy grid) ----------
@@ -1243,22 +1290,27 @@ async function applyBoardTimeChange(room, visitId, loSlot, hiSlot){
   const newStart = loSlot, newEnd = slotEnd(hiSlot);
   const oldStart = v.bookingStart, oldEnd = v.bookingEnd;
   if(newStart === oldStart && newEnd === oldEnd){ render(); return; }
-  const conflict = (state.log.rooms[room]||[]).some(o =>
-    o.id !== visitId && o.bookingStart && o.bookingEnd &&
-    newStart < o.bookingEnd && newEnd > o.bookingStart);
-  if(conflict){
-    alert('이미 다른 손님이 점유하고 있는 시간입니다. 다른 시간을 선택해주세요.');
+  const linked = linkedVisits(room, visitId);   // a multi-room booking moves as one
+  const ids = new Set(linked.map(m=>m.v.id));
+  const blocked = linked.filter(({room:r})=>
+    (state.log.rooms[r]||[]).some(o =>
+      !ids.has(o.id) && o.bookingStart && o.bookingEnd &&
+      newStart < o.bookingEnd && newEnd > o.bookingStart));
+  if(blocked.length){
+    alert(`${blocked.map(m=>ROOM_LABEL[m.room]||m.room).join(', ')} 에 이미 다른 손님이 점유하고 있는 시간입니다. 다른 시간을 선택해주세요.`);
     render();
     return;
   }
   if(!guardEdit()) return;              // guardEdit() renders on refusal
   const who = v.customer || '이름없음';
-  if(!confirm(`${ROOM_LABEL[room]||room} "${who}"님의 예약 시간을 변경할까요?\n\n${oldStart}~${oldEnd}  →  ${newStart}~${newEnd}`)){
+  const where = linked.length > 1
+    ? `${linked.map(m=>ROOM_LABEL[m.room]||m.room).join('·')} (함께 예약)`
+    : (ROOM_LABEL[room]||room);
+  if(!confirm(`${where} "${who}"님의 예약 시간을 변경할까요?\n\n${oldStart}~${oldEnd}  →  ${newStart}~${newEnd}`)){
     render();
     return;
   }
-  v.bookingStart = newStart;
-  v.bookingEnd = newEnd;
+  linked.forEach(({v:m})=>{ m.bookingStart = newStart; m.bookingEnd = newEnd; });
   await persistAndRender();             // board times are shared, so commit now
 }
 function openBookingDialog(room, start, end){
@@ -1287,10 +1339,23 @@ function submitBooking(){
   const phone = phoneEl.value.trim();
   const end = endEl.value;
   if(!name){ alert('예약자 이름을 입력하세요.'); return; }
-  const visits = state.log.rooms[room];
-  const conflict = visits.some(v=>v.bookingStart && v.bookingEnd && start < v.bookingEnd && end > v.bookingStart);
-  if(conflict){ alert('선택한 시간대에 이미 다른 예약이 있습니다. 시간을 다시 선택해주세요.'); return; }
-  visits.push({ id:uid(), customer:name, phone, payments:[], birdieCount:0, bookingStart:start, bookingEnd:end, createdBy: session?session.name:'' });
+  // Re-check every target room now: the end time may have moved after the
+  // extra rooms were ticked.
+  const rooms = [room, ...(bookingDialog.extraRooms||[]).filter(r=>r!==room)];
+  const taken = rooms.filter(r=>!roomFreeFor(r, start, end));
+  if(taken.length){
+    alert(`${taken.map(r=>ROOM_LABEL[r]||r).join(', ')} 은(는) 선택한 시간대에 이미 예약이 있습니다. 시간이나 방을 다시 선택해주세요.`);
+    return;
+  }
+  const groupId = rooms.length > 1 ? uid() : null;
+  rooms.forEach(r=>{
+    state.log.rooms[r].push({
+      id: uid(), customer: name, phone, payments: [], birdieCount: 0,
+      bookingStart: start, bookingEnd: end,
+      ...(groupId ? { groupId } : {}),
+      createdBy: session ? session.name : ''
+    });
+  });
   bookingDialog = null;
   persistAndRender(); // structural: a new booking should land on the board for everyone immediately
 }
@@ -1300,27 +1365,27 @@ function submitBooking(){
 function setBookingRange(room, visitId, field, value){
   if(!guardEdit()) return;
   const v = getVisit(room, visitId);
+  const linked = linkedVisits(room, visitId);   // a multi-room booking moves as one
   if(field==='start' && value===''){
-    delete v.bookingStart;
-    delete v.bookingEnd;
-    markDirty(visitId);
+    linked.forEach(({v:m})=>{ delete m.bookingStart; delete m.bookingEnd; dirtyVisits.add(m.id); });
+    render();
     return;
   }
   let newStart = field==='start' ? value : v.bookingStart;
   let newEnd = field==='end' ? value : v.bookingEnd;
   if(!newEnd || newEnd <= newStart) newEnd = slotEnd(newStart);
-  const conflict = state.log.rooms[room].some(other =>
-    other.id!==visitId && other.bookingStart && other.bookingEnd &&
-    newStart < other.bookingEnd && newEnd > other.bookingStart
-  );
-  if(conflict){
-    alert('이미 다른 손님이 점유하고 있는 시간입니다. 다른 시간을 선택해주세요.');
+  const ids = new Set(linked.map(m=>m.v.id));
+  const blocked = linked.filter(({room:r})=>
+    (state.log.rooms[r]||[]).some(other =>
+      !ids.has(other.id) && other.bookingStart && other.bookingEnd &&
+      newStart < other.bookingEnd && newEnd > other.bookingStart));
+  if(blocked.length){
+    alert(`${blocked.map(m=>ROOM_LABEL[m.room]||m.room).join(', ')} 에 이미 다른 손님이 점유하고 있는 시간입니다. 다른 시간을 선택해주세요.`);
     render(); // revert the <select> back to the real (unchanged) value
     return;
   }
-  v.bookingStart = newStart;
-  v.bookingEnd = newEnd;
-  markDirty(visitId);
+  linked.forEach(({v:m})=>{ m.bookingStart = newStart; m.bookingEnd = newEnd; dirtyVisits.add(m.id); });
+  render();
 }
 // Clicking a booked slot on the board jumps to that visit's card in the room
 // panel below and expands only it — every other card in that room folds, so
@@ -1336,15 +1401,19 @@ function focusVisitFromBoard(room, visitId){
   const el = document.getElementById('visit-' + visitId);
   if(el) el.scrollIntoView({ behavior:'smooth', block:'center' });
 }
+// Name and phone identify the party, so on a multi-room booking they're kept
+// the same across its rooms — otherwise the linked cards would drift apart.
 function setCustomer(room, visitId, v){
   if(isBlockedForEdit()) return;
-  getVisit(room, visitId).customer = v;
-  refreshVisitSummaryName(visitId, v);
-  markDirtyQuiet(visitId);
+  linkedVisits(room, visitId).forEach(({v:m})=>{
+    m.customer = v;
+    refreshVisitSummaryName(m.id, v);
+    markDirtyQuiet(m.id);
+  });
 }
 function setPhone(room, visitId, v){
   if(isBlockedForEdit()) return;
-  getVisit(room, visitId).phone = v; markDirtyQuiet(visitId);
+  linkedVisits(room, visitId).forEach(({v:m})=>{ m.phone = v; markDirtyQuiet(m.id); });
 }
 function addPayment(room, visitId){
   if(!guardEdit()) return;
@@ -1444,13 +1513,27 @@ function computeSummary(log){
   let birdieTotal = 0;
   let birdieCountSum = 0;
 
+  ROOMS.forEach(r=>{ roomTotals[r] = {cash:0, card:0, transfer:0}; });
+  // Which rooms each multi-room booking occupies, so its money can be shared
+  // between them instead of piling onto whichever card it was typed into.
+  const groupRooms = {};
   ROOMS.forEach(r=>{
-    roomTotals[r] = {cash:0, card:0, transfer:0};
+    (log.rooms[r]||[]).forEach(v=>{
+      if(!v.groupId) return;
+      (groupRooms[v.groupId] = groupRooms[v.groupId] || []);
+      if(!groupRooms[v.groupId].includes(r)) groupRooms[v.groupId].push(r);
+    });
+  });
+
+  ROOMS.forEach(r=>{
     (log.rooms[r]||[]).forEach(v=>{
       v.payments.forEach(p=>{
-        if(p.type==='HOLE') sgTotal += Number(p.amount)||0;
-        roomTotals[r][p.method] += Number(p.amount)||0;
-        totals[p.method] += Number(p.amount)||0;
+        const amt = Number(p.amount)||0;
+        if(p.type==='HOLE') sgTotal += amt;
+        totals[p.method] += amt;                 // the day's total counts it once
+        const share = (v.groupId && groupRooms[v.groupId] && groupRooms[v.groupId].length > 1)
+          ? groupRooms[v.groupId] : [r];
+        splitAmount(amt, share.length).forEach((part, i)=>{ roomTotals[share[i]][p.method] += part; });
       });
       const bc = Number(v.birdieCount)||0;
       birdieCountSum += bc;
@@ -1708,7 +1791,9 @@ function renderBoardRow(room, visits, occupiedColor){
     const owner = shown.find(v=>v.bookingStart && v.bookingEnd && slot >= v.bookingStart && slot < v.bookingEnd);
     if(owner && slot === owner.bookingStart){
       const span = Math.max(1, Math.round((toMinutes(owner.bookingEnd) - toMinutes(owner.bookingStart)) / 30));
-      const tip = `${owner.customer||''}${owner.phone?' ☎'+owner.phone:''} (${owner.bookingStart}~${owner.bookingEnd}) — 길게 눌러 끌면 시간 변경`;
+      const mates = owner.groupId ? groupMembers(owner.groupId) : [];
+      const groupNote = mates.length > 1 ? ` · ${mates.map(m=>ROOM_LABEL[m.room]||m.room).join('·')} 함께 예약` : '';
+      const tip = `${owner.customer||''}${owner.phone?' ☎'+owner.phone:''} (${owner.bookingStart}~${owner.bookingEnd})${groupNote} — 길게 눌러 끌면 시간 변경`;
       html += `<td class="board-cell occupied" colspan="${span}" style="background:${occupiedColor};" title="${escAttr(tip)}"`
            +  ` data-room="${room}" data-visit="${owner.id}" data-start="${owner.bookingStart}" data-end="${owner.bookingEnd}"`
            +  ` onmousedown="event.preventDefault();startBoardEditDrag(event,this)">${escHtml(owner.customer||'')}</td>`;
@@ -1726,23 +1811,47 @@ function renderBoardRow(room, visits, occupiedColor){
   }
   return html;
 }
+// Is this room completely free for [start, end)? Used to decide which rooms
+// may be offered as extras in the booking dialog.
+function roomFreeFor(room, start, end, ignoreGroupId){
+  return !(state.log.rooms[room]||[]).some(v =>
+    v.bookingStart && v.bookingEnd &&
+    !(ignoreGroupId && v.groupId === ignoreGroupId) &&
+    start < v.bookingEnd && end > v.bookingStart);
+}
 function renderBookingDialog(){
   if(!bookingDialog) return '';
   const { room, start, end } = bookingDialog;
   const endOptions = endTimeOptions(start);
   const defaultEnd = (end && endOptions.includes(end)) ? end : endOptions[Math.min(1, endOptions.length-1)];
+  // Checkboxes are filtered against the currently shown end time; changing the
+  // end time re-renders so the list stays truthful.
+  const extras = ROOMS.filter(r => r !== room && roomFreeFor(r, start, defaultEnd));
+  const picked = bookingDialog.extraRooms || [];
   return `
     <div class="modal-backdrop" onclick="if(event.target===this)closeBookingDialog()">
       <div class="modal-box">
         <h3 style="margin:0 0 4px;font-size:16px;">${ROOM_LABEL[room]||room} 예약 — ${start} 시작</h3>
         <label>예약자 이름</label>
-        <input type="text" id="bookingCustomer" placeholder="예약자 이름" onkeydown="if(event.key==='Enter'){submitBooking()}">
+        <input type="text" id="bookingCustomer" placeholder="예약자 이름" value="${escAttr(bookingDialog.customer||'')}" oninput="bookingDialog.customer=this.value" onkeydown="if(event.key==='Enter'){submitBooking()}">
         <label>전화번호 (선택)</label>
-        <input type="tel" id="bookingPhone" placeholder="010-0000-0000" onkeydown="if(event.key==='Enter'){submitBooking()}">
+        <input type="tel" id="bookingPhone" placeholder="010-0000-0000" value="${escAttr(bookingDialog.phone||'')}" oninput="bookingDialog.phone=this.value" onkeydown="if(event.key==='Enter'){submitBooking()}">
         <label>종료 시간</label>
-        <select id="bookingEnd">
+        <select id="bookingEnd" onchange="bookingDialog.end=this.value;render()">
           ${endOptions.map(o=>`<option value="${o}" ${o===defaultEnd?'selected':''}>${o}</option>`).join('')}
         </select>
+        <label>함께 쓸 방 (선택)</label>
+        ${extras.length ? `
+          <div class="room-picker">
+            ${extras.map(r=>`
+              <label class="room-pick ${picked.includes(r)?'on':''}">
+                <input type="checkbox" ${picked.includes(r)?'checked':''} onchange="toggleExtraRoom('${r}',this.checked)">
+                ${ROOM_LABEL[r]||r}
+              </label>
+            `).join('')}
+          </div>
+          <p style="font-size:11px;color:#888;margin:2px 0 0;">여러 방을 고르면 하나의 예약으로 묶여 시간 변경·삭제가 함께 적용되고, 결제 금액은 방마다 나눠서 집계됩니다.</p>
+        ` : '<p style="font-size:12px;color:#999;margin:0;">이 시간에 비어 있는 다른 방이 없습니다.</p>'}
         <div style="display:flex;gap:8px;margin-top:14px;">
           <button class="btn primary" onclick="submitBooking()">예약 생성</button>
           <button class="btn" onclick="closeBookingDialog()">취소</button>
@@ -1750,6 +1859,13 @@ function renderBookingDialog(){
       </div>
     </div>
   `;
+}
+function toggleExtraRoom(room, on){
+  if(!bookingDialog) return;
+  const cur = new Set(bookingDialog.extraRooms || []);
+  if(on) cur.add(room); else cur.delete(room);
+  bookingDialog.extraRooms = [...cur];
+  render();
 }
 
 function renderEditView(){
@@ -1824,10 +1940,15 @@ function renderVisitCard(room, v){
   const dirty = dirtyVisits.has(v.id);
   const total = v.payments.reduce((s,p)=>s+(Number(p.amount)||0), 0);
   const bookingLabel = v.bookingStart ? `예약 ${v.bookingStart}~${v.bookingEnd}` : '시간 미지정';
+  const members = v.groupId ? groupMembers(v.groupId) : [];
+  const groupTag = members.length > 1
+    ? `<span class="group-tag" title="${escAttr(members.map(m=>ROOM_LABEL[m.room]||m.room).join('·'))} 을(를) 함께 쓰는 예약입니다. 시간 변경과 삭제가 함께 적용되고, 결제 금액은 방마다 나눠서 집계됩니다.">🔗 ${escHtml(members.map(m=>ROOM_LABEL[m.room]||m.room).join('·'))}</span>`
+    : '';
   const summaryBar = `
     <div class="visit-summary-bar" onclick="toggleVisitCollapse('${v.id}')">
       <span class="collapse-arrow">${collapsed?'▶':'▼'}</span>
       <b>${escHtml(v.customer)||'(이름 미입력)'}</b>
+      ${groupTag}
       <span class="visit-summary-meta">${bookingLabel} · 결제 ${fmt(total)}원</span>
       ${dirty?'<span class="unsaved-dot" title="저장하지 않은 변경사항이 있습니다">● 미저장</span>':''}
     </div>
