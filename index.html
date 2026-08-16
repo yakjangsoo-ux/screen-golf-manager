@@ -199,6 +199,30 @@
   .lock-banner.admin-mode{background:#e6f4ff;border-color:#a9d4ff;color:#0b4a8f;}
   .backup-note{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:6px;font-size:12px;opacity:.85;}
   .backup-note.failed{color:var(--danger);opacity:1;font-weight:600;}
+
+  /* 메뉴얼 — the numbered badges drawn on the figures and the numbers in the
+     step list are the same red circle on purpose: that pairing is the whole
+     point, so ② in the picture is found instantly in the text. */
+  .manual-fig{margin:4px 0 12px;text-align:center;}
+  .manual-fig img{
+    max-width:100%;height:auto;display:inline-block;
+    border:1px solid var(--line);border-radius:var(--radius-md);background:#fff;
+  }
+  .manual-fig figcaption{margin-top:5px;font-size:11.5px;color:var(--ink-muted);}
+  .manual-steps{margin:0;padding:0;list-style:none;counter-reset:mstep;}
+  .manual-steps > li{
+    position:relative;padding-left:30px;margin-bottom:8px;line-height:1.7;counter-increment:mstep;
+  }
+  .manual-steps > li::before{
+    content:counter(mstep);position:absolute;left:0;top:3px;
+    width:21px;height:21px;border-radius:50%;background:var(--danger);color:#fff;
+    font-size:12px;font-weight:700;line-height:21px;text-align:center;
+  }
+  .manual-note{
+    margin:10px 0 0;padding:9px 11px;border-radius:var(--radius-sm);
+    background:#fff8e6;border:1px solid #ffe58a;color:#6b5200;font-size:12.5px;line-height:1.65;
+  }
+  .manual-note.tip{background:#eef6ff;border-color:#bcdcff;color:#0b4a8f;}
   .save-error-banner{
     display:flex;align-items:center;gap:10px;flex-wrap:wrap;
     background:#fdeceb;border:1px solid var(--danger);color:#8a2018;
@@ -1875,49 +1899,117 @@ function manualSection(title, bodyHtml){
     </div>
   `;
 }
+function manualFig(file, caption){
+  return `
+    <figure class="manual-fig">
+      <img src="guide/${file}" alt="${escAttr(caption)}" loading="lazy">
+      <figcaption>${escHtml(caption)}</figcaption>
+    </figure>
+  `;
+}
+// Figure first, then steps numbered to match the badges drawn on it. The
+// figures are generated from the running app, so they always show the real
+// screen rather than a drawing of one.
 function renderManualView(){
   return `
     ${renderNav()}
+
     ${manualSection(icon("lock")+" 로그인", `
-      <p>아이디에 <b>본인 이름</b>을 입력하고, 관리자에게 받은 비밀번호를 입력합니다.<br>
-      관리자는 아이디 <b>admin</b> + 관리자 비밀번호로 로그인합니다.</p>
+      ${manualFig('fig-login.png', '로그인 화면')}
+      <ol class="manual-steps">
+        <li><b>아이디</b>에 본인 이름을 입력합니다. 관리자는 <b>admin</b>을 입력합니다.</li>
+        <li>관리자에게 받은 <b>비밀번호</b>를 입력합니다.</li>
+        <li><b>로그인</b>을 누릅니다.</li>
+      </ol>
     `)}
-    ${manualSection(icon("calendar")+" 상황판(맨 위 표) 사용법", `
-      <ul style="margin:0;padding-left:18px;line-height:1.8;">
-        <li><b>빈 칸(흰색) 클릭</b> — 그 시간에 새 예약을 만듭니다. 이름과 종료 시간을 입력하고 "예약 생성"을 누르면 됩니다.</li>
-        <li><b>빈 칸을 눌러서 드래그</b> — 시작~종료 시간을 한 번에 선택할 수 있습니다. 예: 10시 칸부터 12시 칸까지 눌러서 끌면 종료 시간이 12:30(선택한 마지막 칸 다음)으로 자동 설정됩니다. 휴대폰에서는 빈 칸을 <b>잠깐 길게 누른 뒤</b> 끌면 됩니다(바로 쓸어넘기면 화면이 스크롤됩니다).</li>
-        <li><b>예약된 칸(색칠된 칸, 이름 표시됨) 클릭</b> — 상황판에서는 삭제되지 않고, 아래 해당 룸 탭으로 이동해서 그 방문 카드가 펼쳐집니다. 결제 입력이나 삭제는 거기서 합니다.</li>
-        <li><b>예약된 칸을 끌어서 시간 변경</b> — 예약된 칸을 누른 채(휴대폰은 길게 누른 뒤) 원하는 시간대까지 끌면 그 예약의 시간이 바뀝니다. 끌기 시작하면 기존 블록이 잠시 사라지고 선택 범위가 표시되며, 손을 떼면 변경할지 묻는 확인창이 뜹니다. 다른 예약과 겹치는 시간으로는 옮길 수 없습니다.</li>
-      </ul>
+
+    ${manualSection(icon("calendar")+" 상황판 — 맨 위 표", `
+      ${manualFig('fig-board.png', '상황판. 가로는 시간(30분 단위), 세로는 방입니다.')}
+      <ol class="manual-steps">
+        <li><b>날짜 이동</b> — <b>‹</b> <b>›</b> 로 전날·다음날로 넘기고, 가운데 날짜를 누르면 달력에서 고를 수 있습니다.</li>
+        <li><b>빈 칸(흰색)</b> — 누르면 그 시간에 새 예약을 만듭니다.
+          <b>누른 채 옆으로 끌면</b> 시작~종료 시간을 한 번에 고를 수 있습니다.
+          예를 들어 10시 칸부터 12시 칸까지 끌면 종료 시간이 12:30으로 잡힙니다.</li>
+        <li><b>예약된 칸(색칠된 칸)</b> — 누르면 아래쪽 그 방의 카드로 이동합니다.
+          <b>누른 채 끌면</b> 예약 시간이 바뀌고, 손을 떼면 바꿀지 묻는 창이 뜹니다.
+          다른 예약과 겹치는 시간으로는 옮겨지지 않습니다.</li>
+        <li><b>마감 처리</b> — 그날 입력을 다 마쳤을 때 누릅니다.</li>
+      </ol>
+      <p class="manual-note">
+        <b>휴대폰에서 끌 때는</b> 칸을 <b>잠깐 길게 누른 뒤</b> 손가락을 움직여주세요.
+        바로 쓸어넘기면 예약이 아니라 화면이 스크롤됩니다.
+      </p>
     `)}
-    ${manualSection(icon("pencil")+" 방문(예약) 카드 입력", `
-      <ul style="margin:0;padding-left:18px;line-height:1.8;">
-        <li>룸 탭(R1, R2 ...)을 선택한 뒤 <b>"+ 방문(예약) 추가"</b>를 누르면 새 카드가 생깁니다.</li>
-        <li>예약자 이름, 연락처(선택), 예약 시간을 입력합니다. 상황판과 자동으로 연결됩니다.</li>
-        <li><b>"+ 결제 추가"</b>로 결제 항목을 추가합니다: 항목 종류(게임비/홀인원응모(S)/기타), 결제수단(현금/카드/이체), 금액, 메모(예: 맥주, 8000x2) 순서로 입력합니다. 결제는 한 방문에 여러 건 추가할 수 있습니다.</li>
-        <li><b>버디 횟수</b>를 입력하면 지급액(1회당 100원)이 자동 계산됩니다.</li>
-        <li>카드 맨 위 요약 줄을 클릭하면 카드를 접었다 펼 수 있습니다.</li>
-        <li>이름·연락처·예약시간·결제·버디 횟수를 수정하면 바로 저장되지 않고, 카드 오른쪽 위에 <b>"● 미저장"</b> 표시가 나타납니다. 카드 아래쪽 <b>저장</b> 버튼(파란색으로 바뀝니다)을 눌러야 실제로 반영됩니다.</li>
-        <li>방문 추가/삭제와 상황판에서 만든 예약은 곧바로 저장됩니다.</li>
-        <li>저장하거나 삭제할 때마다 누가 했는지가 관리자 페이지의 변경 이력에 기록됩니다.</li>
-      </ul>
+
+    ${manualSection(icon("pencil")+" 예약 만들기", `
+      ${manualFig('fig-booking.png', '상황판에서 빈 칸을 누르면 나오는 창')}
+      <ol class="manual-steps">
+        <li><b>예약자 이름</b>을 입력합니다. 전화번호는 선택입니다.</li>
+        <li><b>인원수</b>를 입력하면 <b>1명당 1시간</b>으로 종료 시간이 자동으로 잡힙니다.
+          단, 상황판에서 <b>끌어서 시간을 정해 두었다면 그 시간이 그대로 유지</b>됩니다.</li>
+        <li><b>종료 시간</b>은 직접 골라서 바꿀 수 있습니다.</li>
+        <li><b>함께 쓸 방</b> — 한 팀이 방 두 개를 쓸 때 여기서 같이 고릅니다.
+          하나의 예약으로 묶여서 이름·시간 변경과 삭제가 함께 적용됩니다.
+          <b>결제는 방마다 따로</b> 입력합니다.</li>
+        <li><b>예약 생성</b>을 누르면 상황판에 바로 나타납니다.</li>
+      </ol>
     `)}
+
+    ${manualSection(icon("pencil")+" 예약 카드 — 이름·결제 입력", `
+      ${manualFig('fig-card.png', '룸 탭(R1, R2 …)을 고르면 나오는 카드')}
+      <ol class="manual-steps">
+        <li><b>맨 윗줄</b>을 누르면 카드를 접었다 펼 수 있습니다.</li>
+        <li><b>이름·연락처</b>와 예약 시간을 고칩니다. 상황판과 자동으로 연결됩니다.</li>
+        <li><b>결제</b> — 항목(게임비 / 홀인원응모 / 기타), 결제수단(현금 / 카드 / 이체),
+          금액, 메모 순서로 입력합니다. <b>+ 결제 추가</b>로 한 방문에 여러 건을 넣을 수 있습니다.</li>
+        <li><b>인원·버디</b> — 버디는 1회당 100원이 자동으로 계산됩니다.</li>
+        <li><b>저장</b> — 고친 내용은 이 버튼을 눌러야 반영됩니다.</li>
+      </ol>
+      <p class="manual-note">
+        내용을 고치면 카드에 <b>"● 미저장"</b>이 나타나고 <b>저장</b> 버튼이 파란색으로 바뀝니다.
+        <b>이때 저장을 누르지 않고 화면을 나가면 고친 내용이 사라집니다.</b>
+        저장을 누르면 잠깐 <b>"저장됨"</b>으로 바뀌는데, 그게 보여야 실제로 저장된 것입니다.
+      </p>
+      <p class="manual-note tip">
+        새 방문을 <b>추가</b>하거나 <b>삭제</b>한 것, 상황판에서 만든 예약은 곧바로 저장됩니다.
+        누가 저장하고 삭제했는지는 관리자 페이지의 <b>변경 이력</b>에 남습니다.
+      </p>
+    `)}
+
     ${manualSection(icon("flag")+" 연습장 매출", `
-      <p>일지 입력 화면 아래쪽 "연습장 매출" 항목에서 <b>"+ 연습장 매출 추가"</b>로 입력합니다. 결제수단과 금액을 선택하면 됩니다.</p>
+      ${manualFig('fig-practice.png', '일지 화면 아래쪽 연습장 매출')}
+      <ol class="manual-steps">
+        <li><b>+ 연습장 매출 추가</b>를 누르고 결제수단과 금액을 입력합니다.</li>
+        <li>여기도 <b>저장</b>을 눌러야 반영됩니다.</li>
+      </ol>
     `)}
-    ${manualSection(icon("lock")+" 마감 처리", `
-      <p>그날 입력을 다 마쳤으면 <b>"마감 처리"</b>를 누릅니다. 마감 후에는 직원이 수정할 수 없고, 관리자만 수정하거나 "마감 취소"를 할 수 있습니다.</p>
-      <p style="margin-bottom:0;"><b>마감하면 일지 파일이 PC에 자동 저장됩니다.</b>
-      단, 처음 한 번은 관리자 페이지의 "마감 시 자동 백업"에서 저장할 폴더를 직접 지정해줘야 합니다(예: C:\\스크린골프).
-      그 뒤로는 마감할 때마다 그 폴더 안에 <b>월별 폴더</b>가 만들어지고
-      <b>날짜 일지.xlsx</b>(열어보는 용도)와 <b>날짜 일지.json</b>(복구용)이 저장됩니다.
-      이 기능은 <b>PC의 크롬·엣지에서만</b> 동작합니다. 휴대폰에서 마감하면 마감은 되지만 파일은 저장되지 않으니,
-      나중에 PC에서 그 날짜를 열고 관리자 페이지의 "지금 백업"을 눌러주세요.</p>
+
+    ${manualSection(icon("lock")+" 마감 처리와 백업", `
+      ${manualFig('fig-closed.png', '마감한 뒤 나타나는 안내')}
+      <ol class="manual-steps">
+        <li>그날 입력을 다 마쳤으면 <b>마감 처리</b>를 누릅니다.
+          마감 후에는 직원이 고칠 수 없고, 관리자만 고치거나 <b>마감 취소</b>를 할 수 있습니다.</li>
+        <li>마감하면 그날 일지가 <b>PC 폴더에 파일로 저장</b>되고, 저장된 위치가 여기에 표시됩니다.
+          월별 폴더가 만들어지고 <b>날짜 일지.xlsx</b>(열어보는 용도)와
+          <b>날짜 일지.json</b>(복구용) 두 개가 생깁니다.</li>
+      </ol>
+      <p class="manual-note">
+        자동 백업은 <b>PC의 크롬·엣지에서만</b> 됩니다. 휴대폰에서 마감하면 마감은 되지만 파일은 생기지 않습니다.
+        그럴 때는 나중에 PC에서 그 날짜를 열고 관리자 페이지의 <b>지금 백업</b>을 눌러주세요.
+      </p>
     `)}
-    ${isAdmin() ? manualSection(icon("wrench")+" 관리자 전용 기능", `
-      <ul style="margin:0;padding-left:18px;line-height:1.8;">
-        <li><b>조회/통계</b> — 월별로 날짜별 매출 합계를 확인할 수 있습니다. 날짜를 클릭하면 해당 일지 편집 화면으로 이동합니다.</li>
-        <li><b>관리자 페이지</b> — 관리자 비밀번호 변경, 기간별 엑셀 출력(최대 1개월, 날짜별 탭으로 구분), 직원 계정 추가/비밀번호 재설정/삭제, 변경 이력(예약 카드 저장·삭제) 확인이 가능합니다.</li>
+
+    ${isAdmin() ? manualSection(icon("wrench")+" 관리자 전용", `
+      ${manualFig('fig-backup.png', '관리자 페이지 → 마감 시 자동 백업')}
+      <ol class="manual-steps">
+        <li><b>백업 폴더는 처음 한 번만 지정하면 됩니다.</b>
+          관리자 페이지의 <b>폴더 지정</b>을 눌러 저장할 폴더(예: C:\스크린골프)를 고르고 권한을 허용해주세요.
+          그 뒤로는 마감할 때마다 자동으로 저장됩니다.</li>
+      </ol>
+      <ul style="margin:10px 0 0;padding-left:18px;line-height:1.8;">
+        <li><b>조회/통계</b> — 월별 날짜별 매출 합계를 봅니다. 날짜를 누르면 그날 일지로 이동합니다.</li>
+        <li><b>관리자 페이지</b> — 관리자 비밀번호 변경, 기간별 엑셀 출력(최대 1개월),
+          직원 계정 추가·비밀번호 재설정·삭제, 변경 이력 확인.</li>
       </ul>
     `) : ''}
   `;
