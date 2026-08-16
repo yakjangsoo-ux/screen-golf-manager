@@ -217,9 +217,19 @@
      one rounded object sitting on the grid instead of a run of tinted cells
      with grid lines cutting through it. Absolutely positioned because
      percentage heights inside a table cell aren't reliable. */
-  .board-cell.occupied{position:relative;background:transparent;padding:0;}
+  /* A booking is one colspan cell, so the 30-min boundaries it covers have no
+     cell edges to draw. They're painted here instead — tiled at exactly one
+     slot width via --span — so the block can sit shorter than the row and let
+     the slot grid read through above and below it. That's what makes it
+     possible to see which slot you're grabbing before a drag starts. */
+  .board-cell.occupied{
+    position:relative;padding:0;
+    background-image:linear-gradient(to right, #ececec 0 1px, transparent 1px);
+    background-size:calc(100% / var(--span, 1)) 100%;
+    background-repeat:repeat-x;
+  }
   .board-cell.occupied .booking{
-    position:absolute;inset:3px 2px;border-radius:7px;
+    position:absolute;inset:6px 2px;border-radius:6px;
     display:flex;align-items:center;justify-content:center;padding:0 6px;
     overflow:hidden;
     color:#7a2050;font-weight:bold;
@@ -1806,7 +1816,7 @@ function renderBoardRow(room, visits, occupiedColor){
       const mates = owner.groupId ? groupMembers(owner.groupId) : [];
       const groupNote = mates.length > 1 ? ` · ${mates.map(m=>ROOM_LABEL[m.room]||m.room).join('·')} 함께 예약` : '';
       const tip = `${owner.customer||''}${owner.phone?' ☎'+owner.phone:''} (${owner.bookingStart}~${owner.bookingEnd})${groupNote} — 길게 눌러 끌면 시간 변경`;
-      html += `<td class="board-cell occupied${hourClass(owner.bookingStart)}" colspan="${span}" title="${escAttr(tip)}"`
+      html += `<td class="board-cell occupied${hourClass(owner.bookingStart)}" colspan="${span}" title="${escAttr(tip)}" style="--span:${span};"`
            +  ` data-room="${room}" data-visit="${owner.id}" data-start="${owner.bookingStart}" data-end="${owner.bookingEnd}"`
            +  ` onmousedown="event.preventDefault();startBoardEditDrag(event,this)"`
            +  `><span class="booking" style="background:${occupiedColor};"><span class="booking-name">${escHtml(owner.customer||'')}</span></span></td>`;
