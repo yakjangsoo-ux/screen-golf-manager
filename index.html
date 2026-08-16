@@ -26,6 +26,7 @@
     --radius-md:11px;
     --radius-sm:8px;
     --body-pad:16px;
+    --logo-h:46px;       /* header logo height; the fixed bar sizes off it */
   }
   *{box-sizing:border-box;}
   /* Sized in em so an icon always matches the text beside it, and stroked in
@@ -317,9 +318,17 @@
   .view-toggle{display:none;}
 
   #header{position:fixed;top:0;left:0;right:0;z-index:600;background:#fff;padding:0 var(--body-pad);}
-  body{padding-top:66px;}
-  .app-header{padding:10px 0;position:relative;justify-content:flex-end;}
+  /* Both are driven by --logo-h so the bar and the body offset can never
+     drift apart: the bar is the logo plus its 10px padding, and the body
+     starts 8px below that. */
+  body{padding-top:calc(var(--logo-h) + 28px);}
+  .app-header{padding:10px 0;position:relative;justify-content:flex-end;min-height:calc(var(--logo-h) + 20px);}
   .app-header h1{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);font-size:20px;white-space:nowrap;}
+  /* The logo is sized by height so the wordmark inside it stays about as
+     tall as the 20px text title it replaces; width follows the artwork.
+     max-width keeps it clear of the hamburger on a narrow phone. */
+  .app-header h1.brand{line-height:0;}
+  .brand-logo{display:block;height:var(--logo-h);width:auto;max-width:min(62vw, 380px);object-fit:contain;}
   .hamburger-btn{
     display:flex;align-items:center;justify-content:center;flex-shrink:0;
     width:40px;height:40px;border:none;background:transparent;
@@ -374,6 +383,10 @@
     /* Wide slots have room for the full "10:30" instead of the compact form. */
     .board-table th .slot-full{display:inline;}
     .board-table th .slot-short{display:none;}
+
+    /* A monitor has the room, and at phone size the logo looks lost across a
+       wide bar; the phone keeps the smaller one so the header stays shallow. */
+    :root{--logo-h:54px;}
   }
 
   /* iOS Safari zooms the whole page in whenever a focused field's text is
@@ -1692,9 +1705,18 @@ function selectMobileView(key){
   else if(key==='admin'){ openAdminView(); }
   else if(key==='manual'){ state.view='manual'; render(); }
 }
+// The logo art already spells out "대성스크린골프 일지 관리", so it stands in for
+// the title on the home view and on the login screen. The other views keep
+// their own name, which the logo would otherwise contradict.
+// If the file is ever missing the onerror handler puts the text title back,
+// so a broken image can never leave the header blank.
+function brandLogo(){
+  return `<img class="brand-logo" src="logo.png" alt="대성스크린골프 일지 관리"
+    onerror="this.parentElement.innerHTML = ICONS ? icon('flag') + ' 대성스크린골프 일지 관리' : '대성스크린골프 일지 관리';">`;
+}
 function renderHeader(){
   if(!session){
-    return `<h1>${icon("flag")} 대성스크린골프 일지 관리</h1>`;
+    return `<h1 class="brand">${brandLogo()}</h1>`;
   }
   const menuItems = [
     { key:'edit', label:'일지 관리', show:true },
@@ -1707,9 +1729,12 @@ function renderHeader(){
   // name with an unrelated page name beside it.
   const headerIcons = { edit:'flag', list:'chart', admin:'wrench', manual:'book' };
   const title = headerTitles[state.view] || '대성스크린골프 일지 관리';
+  const isHome = state.view === 'edit';
   return `
     <div class="app-header">
-      <h1>${icon(headerIcons[state.view] || 'flag')} ${title}</h1>
+      <h1 class="${isHome ? 'brand' : ''}">${
+        isHome ? brandLogo() : `${icon(headerIcons[state.view] || 'flag')} ${title}`
+      }</h1>
       <button class="hamburger-btn ${mobileMenuOpen?'active':''}" onclick="toggleMobileMenu()" aria-label="메뉴">${icon("menu")}</button>
     </div>
     <div class="mobile-drawer-backdrop ${mobileMenuOpen?'open':''}" onclick="closeMobileMenu()"></div>
@@ -2498,7 +2523,7 @@ function escAttr(s){ return escHtml(s); }
     render();
   }catch(e){
     console.warn('초기 로딩 실패:', e);
-    document.getElementById('header').innerHTML = '<h1>' + icon('flag') + ' 대성스크린골프 일지 관리</h1>';
+    document.getElementById('header').innerHTML = '<h1 class="brand">' + brandLogo() + '</h1>';
     document.getElementById('app').innerHTML =
       '<div class="summary"><p>서버에 연결하지 못했습니다. 인터넷 연결을 확인해주세요.</p>' +
       '<button class="btn primary" onclick="location.reload()">다시 시도</button></div>';
