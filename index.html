@@ -1077,14 +1077,6 @@ function linkedVisits(room, visitId){
 function groupRoomsLabel(groupId){
   return groupMembers(groupId).map(m=>ROOM_LABEL[m.room]||m.room).join('·');
 }
-// Splits an integer amount into n whole parts that still add up exactly, so
-// the room rows never drift a won away from the day's total.
-function splitAmount(total, n){
-  const sign = total < 0 ? -1 : 1;
-  const abs = Math.abs(Math.round(total));
-  const base = Math.floor(abs / n), rem = abs % n;
-  return Array.from({length:n}, (_,i)=> sign * (base + (i < rem ? 1 : 0)));
-}
 
 // ---------- board (occupancy grid) ----------
 // Drag-to-select: mousedown on a free cell starts tracking; mouseenter over
@@ -1513,27 +1505,17 @@ function computeSummary(log){
   let birdieTotal = 0;
   let birdieCountSum = 0;
 
-  ROOMS.forEach(r=>{ roomTotals[r] = {cash:0, card:0, transfer:0}; });
-  // Which rooms each multi-room booking occupies, so its money can be shared
-  // between them instead of piling onto whichever card it was typed into.
-  const groupRooms = {};
+  // Payments count for the room whose card they were entered on, including on
+  // multi-room bookings: those share a time and a customer, but each room is
+  // paid for separately.
   ROOMS.forEach(r=>{
-    (log.rooms[r]||[]).forEach(v=>{
-      if(!v.groupId) return;
-      (groupRooms[v.groupId] = groupRooms[v.groupId] || []);
-      if(!groupRooms[v.groupId].includes(r)) groupRooms[v.groupId].push(r);
-    });
-  });
-
-  ROOMS.forEach(r=>{
+    roomTotals[r] = {cash:0, card:0, transfer:0};
     (log.rooms[r]||[]).forEach(v=>{
       v.payments.forEach(p=>{
         const amt = Number(p.amount)||0;
         if(p.type==='HOLE') sgTotal += amt;
-        totals[p.method] += amt;                 // the day's total counts it once
-        const share = (v.groupId && groupRooms[v.groupId] && groupRooms[v.groupId].length > 1)
-          ? groupRooms[v.groupId] : [r];
-        splitAmount(amt, share.length).forEach((part, i)=>{ roomTotals[share[i]][p.method] += part; });
+        roomTotals[r][p.method] += amt;
+        totals[p.method] += amt;
       });
       const bc = Number(v.birdieCount)||0;
       birdieCountSum += bc;
@@ -1850,7 +1832,7 @@ function renderBookingDialog(){
               </label>
             `).join('')}
           </div>
-          <p style="font-size:11px;color:#888;margin:2px 0 0;">여러 방을 고르면 하나의 예약으로 묶여 시간 변경·삭제가 함께 적용되고, 결제 금액은 방마다 나눠서 집계됩니다.</p>
+          <p style="font-size:11px;color:#888;margin:2px 0 0;">여러 방을 고르면 하나의 예약으로 묶여 이름·시간 변경과 삭제가 함께 적용됩니다. 결제는 방별 카드에서 각각 입력하며, 입력한 방의 매출로 잡힙니다.</p>
         ` : '<p style="font-size:12px;color:#999;margin:0;">이 시간에 비어 있는 다른 방이 없습니다.</p>'}
         <div style="display:flex;gap:8px;margin-top:14px;">
           <button class="btn primary" onclick="submitBooking()">예약 생성</button>
@@ -1942,7 +1924,7 @@ function renderVisitCard(room, v){
   const bookingLabel = v.bookingStart ? `예약 ${v.bookingStart}~${v.bookingEnd}` : '시간 미지정';
   const members = v.groupId ? groupMembers(v.groupId) : [];
   const groupTag = members.length > 1
-    ? `<span class="group-tag" title="${escAttr(members.map(m=>ROOM_LABEL[m.room]||m.room).join('·'))} 을(를) 함께 쓰는 예약입니다. 시간 변경과 삭제가 함께 적용되고, 결제 금액은 방마다 나눠서 집계됩니다.">🔗 ${escHtml(members.map(m=>ROOM_LABEL[m.room]||m.room).join('·'))}</span>`
+    ? `<span class="group-tag" title="${escAttr(members.map(m=>ROOM_LABEL[m.room]||m.room).join('·'))} 을(를) 함께 쓰는 예약입니다. 이름·시간 변경과 삭제는 함께 적용되고, 결제는 방마다 따로 입력합니다.">🔗 ${escHtml(members.map(m=>ROOM_LABEL[m.room]||m.room).join('·'))}</span>`
     : '';
   const summaryBar = `
     <div class="visit-summary-bar" onclick="toggleVisitCollapse('${v.id}')">
