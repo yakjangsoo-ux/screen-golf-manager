@@ -553,6 +553,7 @@ function applyPendingRemote(){
   if(!pendingRemoteLog) return;
   if(state.currentDate !== pendingRemoteLog.date){ pendingRemoteLog = null; return; }
   if(hasUnsavedChanges()) return;                     // keep the user's unsaved draft
+  if(boardDrag) return;                               // a re-render mid-drag would detach the grabbed cell
   const active = document.activeElement;
   if(active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) return; // would break IME composition
   const incoming = pendingRemoteLog;
@@ -1015,15 +1016,88 @@ function getVisit(room, visitId){
 // dragged range pre-filled. A plain click (no real drag) behaves exactly as
 // before — startSlot===endSlot, so openBookingDialog falls back to its
 // default ~1 hour suggestion.
-let boardDrag = null; // { room, startSlot, endSlot } while dragging on the board
+// { mode:'create'|'edit', room, startSlot, endSlot, visitId?, lifted? }
+// 'create' paints a new range over free slots; 'edit' grabs an existing
+// booking and repaints its time range. Both end in finishBoardDrag().
+let boardDrag = null;
 function startBoardDrag(room, slot){
-  boardDrag = { room, startSlot: slot, endSlot: slot };
+  boardDrag = { mode:'create', room, startSlot: slot, endSlot: slot };
   highlightBoardDrag();
+}
+// Which 30-min slot a point falls on inside a merged (colspan) booking cell.
+function slotAtPointInCell(cell, clientX){
+  const i0 = BOARD_SLOTS.indexOf(cell.dataset.start);
+  if(i0 < 0) return null;
+  let i1 = BOARD_SLOTS.indexOf(cell.dataset.end);
+  if(i1 < 0) i1 = BOARD_SLOTS.length;          // bookings ending at 24:00
+  const span = Math.max(1, i1 - i0);
+  const r = cell.getBoundingClientRect();
+  const f = Math.min(0.999, Math.max(0, (clientX - r.left) / (r.width || 1)));
+  return BOARD_SLOTS[i0 + Math.floor(f * span)];
+}
+// Grabs an existing booking. Nothing is lifted or highlighted yet — a press
+// with no movement stays a plain click and still jumps to the visit card.
+function startBoardEditDrag(e, cell){
+  if(isLocked()) return;
+  const slot = slotAtPointInCell(cell, e.clientX);
+  if(!slot) return;
+  boardDrag = { mode:'edit', room: cell.dataset.room, visitId: cell.dataset.visit,
+                startSlot: slot, endSlot: slot, lifted: false, cell };
+}
+// Splits the grabbed booking's merged cell into its individual 30-min slots
+// so the selection can be painted precisely across them.
+//
+// Deliberately DOM surgery rather than a render(): a full re-render replaces
+// the very element the finger is pressing, and events for a detached node
+// never reach the document-level touch listeners — the drag would freeze and
+// touchend would be lost. Reusing the original <td> as the first slot keeps
+// it attached and the gesture alive.
+function liftBookingCell(cell){
+  const room = cell.dataset.room;
+  const i0 = BOARD_SLOTS.indexOf(cell.dataset.start);
+  if(i0 < 0) return;
+  let i1 = BOARD_SLOTS.indexOf(cell.dataset.end);
+  if(i1 < 0) i1 = BOARD_SLOTS.length;
+  const span = Math.max(1, i1 - i0);
+  cell.classList.remove('occupied');
+  cell.classList.add('free');
+  cell.removeAttribute('colspan');
+  cell.removeAttribute('style');
+  cell.textContent = '';
+  cell.dataset.slot = BOARD_SLOTS[i0];
+  let ref = cell;
+  for(let k = 1; k < span; k++){
+    const td = document.createElement('td');
+    td.className = 'board-cell free';
+    td.dataset.room = room;
+    td.dataset.slot = BOARD_SLOTS[i0 + k];
+    ref.after(td);
+    ref = td;
+  }
 }
 function extendBoardDrag(room, slot){
   if(!boardDrag || boardDrag.room !== room) return;
+  if(boardDrag.endSlot === slot) return;   // still on the same slot; nothing to do
   boardDrag.endSlot = slot;
+  if(boardDrag.mode === 'edit' && !boardDrag.lifted){
+    boardDrag.lifted = true;
+    if(boardDrag.cell) liftBookingCell(boardDrag.cell);
+  }
   highlightBoardDrag();
+}
+// The slot under a point, whether it lands on a free cell or inside a
+// booking. Used by the pointer/touch move handlers so a drag can shrink a
+// booking from within itself, not only by leaving it.
+function boardSlotAtPoint(x, y){
+  const el = document.elementFromPoint(x, y);
+  const cell = el && el.closest ? el.closest('.board-cell') : null;
+  if(!cell) return null;
+  if(cell.classList.contains('free') && cell.dataset.slot) return { room: cell.dataset.room, slot: cell.dataset.slot };
+  if(cell.dataset.visit){
+    const slot = slotAtPointInCell(cell, x);
+    return slot ? { room: cell.dataset.room, slot } : null;
+  }
+  return null;
 }
 
 // ----- touch drag -----
@@ -1044,23 +1118,33 @@ function cancelBoardTouchHold(){
   boardTouchHoldTimer = null;
   boardTouchOrigin = null;
 }
-function boardFreeCellAt(x, y){
+function boardCellAt(x, y){
   const el = document.elementFromPoint(x, y);
-  if(!el || !el.classList) return null;
-  const cell = el.closest ? el.closest('.board-cell') : null;
-  return (cell && cell.classList.contains('free')) ? cell : null;
+  return (el && el.closest) ? el.closest('.board-cell') : null;
 }
 function onBoardTouchStart(e){
   if(e.touches.length !== 1) return;          // pinch/zoom is not ours
   const t = e.touches[0];
-  const cell = boardFreeCellAt(t.clientX, t.clientY);
+  const cell = boardCellAt(t.clientX, t.clientY);
   if(!cell) return;
-  boardTouchOrigin = { x:t.clientX, y:t.clientY, room:cell.dataset.room, slot:cell.dataset.slot };
+  const free = cell.classList.contains('free') && cell.dataset.slot;
+  const booking = cell.dataset.visit;
+  if(!free && !booking) return;
+  boardTouchOrigin = {
+    x: t.clientX, y: t.clientY, room: cell.dataset.room,
+    slot: free ? cell.dataset.slot : slotAtPointInCell(cell, t.clientX),
+    visitId: booking || null, cell
+  };
+  if(!boardTouchOrigin.slot){ boardTouchOrigin = null; return; }
   boardTouchHoldTimer = setTimeout(()=>{
-    if(!boardTouchOrigin) return;
+    const o = boardTouchOrigin;
+    if(!o) return;
     boardTouchDragging = true;
     document.body.classList.add('board-dragging');
-    startBoardDrag(boardTouchOrigin.room, boardTouchOrigin.slot);
+    // Holding an existing booking grabs it for a time change; holding a free
+    // slot starts painting a new one.
+    if(o.visitId) startBoardEditDrag({ clientX: o.x }, o.cell);
+    else startBoardDrag(o.room, o.slot);
   }, BOARD_TOUCH_HOLD_MS);
 }
 function onBoardTouchMove(e){
@@ -1069,8 +1153,8 @@ function onBoardTouchMove(e){
     // out from under an active selection.
     e.preventDefault();
     const t = e.touches[0];
-    const cell = boardFreeCellAt(t.clientX, t.clientY);
-    if(cell) extendBoardDrag(cell.dataset.room, cell.dataset.slot);
+    const p = boardSlotAtPoint(t.clientX, t.clientY);
+    if(p) extendBoardDrag(p.room, p.slot);
     return;
   }
   // Moved before the hold completed => the user meant to scroll.
@@ -1102,16 +1186,49 @@ function highlightBoardDrag(){
 }
 function finishBoardDrag(){
   if(!boardDrag) return;
-  const { room, startSlot, endSlot } = boardDrag;
+  const d = boardDrag;
   document.querySelectorAll('.board-cell.selecting').forEach(el=>el.classList.remove('selecting'));
   boardDrag = null;
-  const lo = Math.min(BOARD_SLOTS.indexOf(startSlot), BOARD_SLOTS.indexOf(endSlot));
-  const hi = Math.max(BOARD_SLOTS.indexOf(startSlot), BOARD_SLOTS.indexOf(endSlot));
+  const lo = Math.min(BOARD_SLOTS.indexOf(d.startSlot), BOARD_SLOTS.indexOf(d.endSlot));
+  const hi = Math.max(BOARD_SLOTS.indexOf(d.startSlot), BOARD_SLOTS.indexOf(d.endSlot));
+  if(d.mode === 'edit'){
+    // Never lifted => the press never turned into a drag, so it was a plain
+    // click and keeps its original meaning: jump to that visit's card.
+    if(!d.lifted){ focusVisitFromBoard(d.room, d.visitId); return; }
+    applyBoardTimeChange(d.room, d.visitId, BOARD_SLOTS[lo], BOARD_SLOTS[hi]);
+    return;
+  }
   const start = BOARD_SLOTS[lo];
   // Only pass an explicit end when a real drag happened (more than one slot
   // selected) — a plain click keeps openBookingDialog's own ~1 hour default.
   const end = hi > lo ? slotEnd(BOARD_SLOTS[hi]) : undefined;
-  openBookingDialog(room, start, end);
+  openBookingDialog(d.room, start, end);
+}
+// Applies a board drag that moved/resized an existing booking. Every early
+// return re-renders, which is what puts the lifted block back where it was.
+async function applyBoardTimeChange(room, visitId, loSlot, hiSlot){
+  const v = getVisit(room, visitId);
+  if(!v){ render(); return; }
+  const newStart = loSlot, newEnd = slotEnd(hiSlot);
+  const oldStart = v.bookingStart, oldEnd = v.bookingEnd;
+  if(newStart === oldStart && newEnd === oldEnd){ render(); return; }
+  const conflict = (state.log.rooms[room]||[]).some(o =>
+    o.id !== visitId && o.bookingStart && o.bookingEnd &&
+    newStart < o.bookingEnd && newEnd > o.bookingStart);
+  if(conflict){
+    alert('이미 다른 손님이 점유하고 있는 시간입니다. 다른 시간을 선택해주세요.');
+    render();
+    return;
+  }
+  if(!guardEdit()) return;              // guardEdit() renders on refusal
+  const who = v.customer || '이름없음';
+  if(!confirm(`${ROOM_LABEL[room]||room} "${who}"님의 예약 시간을 변경할까요?\n\n${oldStart}~${oldEnd}  →  ${newStart}~${newEnd}`)){
+    render();
+    return;
+  }
+  v.bookingStart = newStart;
+  v.bookingEnd = newEnd;
+  await persistAndRender();             // board times are shared, so commit now
 }
 function openBookingDialog(room, start, end){
   // Uses isLocked() (not guardEdit()) deliberately: opening the dialog isn't
@@ -1488,8 +1605,9 @@ function renderManualView(){
     ${manualSection('🗓 상황판(맨 위 표) 사용법', `
       <ul style="margin:0;padding-left:18px;line-height:1.8;">
         <li><b>빈 칸(흰색) 클릭</b> — 그 시간에 새 예약을 만듭니다. 이름과 종료 시간을 입력하고 "예약 생성"을 누르면 됩니다.</li>
-        <li><b>빈 칸을 마우스로 눌러서 드래그</b> — 시작~종료 시간을 한 번에 선택할 수 있습니다. 예: 10시 칸부터 12시 칸까지 눌러서 끌면 종료 시간이 12:30(선택한 마지막 칸 다음)으로 자동 설정됩니다.</li>
+        <li><b>빈 칸을 눌러서 드래그</b> — 시작~종료 시간을 한 번에 선택할 수 있습니다. 예: 10시 칸부터 12시 칸까지 눌러서 끌면 종료 시간이 12:30(선택한 마지막 칸 다음)으로 자동 설정됩니다. 휴대폰에서는 빈 칸을 <b>잠깐 길게 누른 뒤</b> 끌면 됩니다(바로 쓸어넘기면 화면이 스크롤됩니다).</li>
         <li><b>예약된 칸(색칠된 칸, 이름 표시됨) 클릭</b> — 상황판에서는 삭제되지 않고, 아래 해당 룸 탭으로 이동해서 그 방문 카드가 펼쳐집니다. 결제 입력이나 삭제는 거기서 합니다.</li>
+        <li><b>예약된 칸을 끌어서 시간 변경</b> — 예약된 칸을 누른 채(휴대폰은 길게 누른 뒤) 원하는 시간대까지 끌면 그 예약의 시간이 바뀝니다. 끌기 시작하면 기존 블록이 잠시 사라지고 선택 범위가 표시되며, 손을 떼면 변경할지 묻는 확인창이 뜹니다. 다른 예약과 겹치는 시간으로는 옮길 수 없습니다.</li>
       </ul>
     `)}
     ${manualSection('✏️ 방문(예약) 카드 입력', `
@@ -1533,7 +1651,7 @@ function renderBoard(){
       </table>
       <div class="board-legend">
         <span class="board-cell-demo free"></span>예약 가능<span class="board-cell-demo occupied"></span>예약됨
-        <span class="board-hint">· 빈 칸을 <b>길게 누른 뒤 끌면</b> 시간대를 한 번에 선택할 수 있습니다</span>
+        <span class="board-hint">· 빈 칸을 <b>길게 누른 뒤 끌면</b> 새 예약, 예약된 칸을 <b>길게 누른 뒤 끌면</b> 시간 변경</span>
       </div>
     </div>
     ${renderBookingDialog()}
@@ -1544,19 +1662,29 @@ function renderBoard(){
 // reservation's name is shown once across its full occupied span, not
 // truncated per-slot.
 function renderBoardRow(room, visits, occupiedColor){
+  // While an existing booking is being dragged to a new time it is "lifted"
+  // out of the row, so its slots render as free cells — that makes the whole
+  // range highlightable by the same code that paints a new selection, and
+  // shows the user the old block has been picked up.
+  const lifted = (boardDrag && boardDrag.mode === 'edit' && boardDrag.lifted) ? boardDrag.visitId : null;
+  const shown = lifted ? visits.filter(v=>v.id !== lifted) : visits;
   let html = '';
   let i = 0;
   while(i < BOARD_SLOTS.length){
     const slot = BOARD_SLOTS[i];
-    const owner = visits.find(v=>v.bookingStart && v.bookingEnd && slot >= v.bookingStart && slot < v.bookingEnd);
+    const owner = shown.find(v=>v.bookingStart && v.bookingEnd && slot >= v.bookingStart && slot < v.bookingEnd);
     if(owner && slot === owner.bookingStart){
       const span = Math.max(1, Math.round((toMinutes(owner.bookingEnd) - toMinutes(owner.bookingStart)) / 30));
-      const tip = `${owner.customer||''}${owner.phone?' ☎'+owner.phone:''} (${owner.bookingStart}~${owner.bookingEnd})`;
-      html += `<td class="board-cell occupied" colspan="${span}" style="background:${occupiedColor};" title="${escAttr(tip)}" onclick="focusVisitFromBoard('${room}','${owner.id}')">${escHtml(owner.customer||'')}</td>`;
+      const tip = `${owner.customer||''}${owner.phone?' ☎'+owner.phone:''} (${owner.bookingStart}~${owner.bookingEnd}) — 길게 눌러 끌면 시간 변경`;
+      html += `<td class="board-cell occupied" colspan="${span}" style="background:${occupiedColor};" title="${escAttr(tip)}"`
+           +  ` data-room="${room}" data-visit="${owner.id}" data-start="${owner.bookingStart}" data-end="${owner.bookingEnd}"`
+           +  ` onmousedown="event.preventDefault();startBoardEditDrag(event,this)">${escHtml(owner.customer||'')}</td>`;
       i += span;
     } else if(owner){
       // Defensive fallback for pre-existing overlapping data; normal use never reaches this.
-      html += `<td class="board-cell occupied" style="background:${occupiedColor};" title="${escAttr(owner.customer||'')}" onclick="focusVisitFromBoard('${room}','${owner.id}')"></td>`;
+      html += `<td class="board-cell occupied" style="background:${occupiedColor};" title="${escAttr(owner.customer||'')}"`
+           +  ` data-room="${room}" data-visit="${owner.id}" data-start="${slot}" data-end="${slotEnd(slot)}"`
+           +  ` onmousedown="event.preventDefault();startBoardEditDrag(event,this)"></td>`;
       i += 1;
     } else {
       html += `<td class="board-cell free" data-room="${room}" data-slot="${slot}" title="${slot} 예약하기(드래그로 시간대 선택 가능)" onmousedown="event.preventDefault();startBoardDrag('${room}','${slot}')" onmouseenter="extendBoardDrag('${room}','${slot}')"></td>`;
@@ -2072,6 +2200,14 @@ function escAttr(s){ return escHtml(s); }
       '<button class="btn primary" onclick="location.reload()">다시 시도</button></div>';
   }
   document.addEventListener('mouseup', ()=>{ if(boardDrag) finishBoardDrag(); });
+  // The per-cell onmouseenter only fires on free cells, so on its own a mouse
+  // drag could never shrink a booking from inside itself. Resolving the slot
+  // from the pointer position covers both cell kinds.
+  document.addEventListener('mousemove', e=>{
+    if(!boardDrag) return;
+    const p = boardSlotAtPoint(e.clientX, e.clientY);
+    if(p) extendBoardDrag(p.room, p.slot);
+  });
   // Bound on document (not per-cell) so they survive every re-render.
   // touchmove MUST be non-passive: preventDefault() there is what stops the
   // page and the board from scrolling while a selection is being dragged.
