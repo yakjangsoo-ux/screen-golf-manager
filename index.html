@@ -112,7 +112,10 @@
   .method-btn.card.active{background:var(--card-bg);border-color:var(--card);font-weight:bold;}
   .method-btn.transfer.active{background:var(--transfer-bg);border-color:var(--transfer);font-weight:bold;}
 
-  .birdie-row{display:flex;gap:8px;align-items:center;font-size:12px;margin-top:4px;color:var(--ink-muted);}
+  .birdie-row{display:flex;gap:8px 16px;align-items:center;flex-wrap:wrap;font-size:12px;margin-top:4px;color:var(--ink-muted);}
+  .meta-item{display:inline-flex;align-items:center;gap:6px;white-space:nowrap;}
+  .people-pick{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:13px;color:var(--ink-muted);}
+  .people-note{font-size:11px;color:#999;}
   .birdie-stepper{display:inline-flex;align-items:stretch;border:1px solid var(--line);border-radius:var(--radius-sm);overflow:hidden;background:#fff;}
   .birdie-stepper button{width:22px;border:none;background:#fff;cursor:pointer;font-size:13px;line-height:1;color:var(--ink);}
   .birdie-stepper button:hover:not(:disabled){background:var(--bg);}
@@ -463,6 +466,21 @@ function endTimeOptions(start){
   return opts;
 }
 function toMinutes(t){ const [h,m] = t.split(':').map(Number); return h*60+m; }
+// A booking runs an hour per person by default. Returns the matching end time,
+// clamped to what's actually bookable from `start` (a 4-person party starting
+// at 21:00 can't run to 01:00, so it takes the latest option instead).
+const HOURS_PER_PERSON = 1;
+function endForPeople(start, people){
+  const opts = endTimeOptions(start);
+  if(!opts.length) return null;
+  const target = toMinutes(start) + Math.max(1, Number(people)||1) * HOURS_PER_PERSON * 60;
+  let best = opts[0];
+  for(const o of opts){
+    if(toMinutes(o) > target) break;
+    best = o;
+  }
+  return best;
+}
 const SESSION_KEY = STORAGE_PREFIX + 'session';
 const DEFAULT_ADMIN_PASSWORD = 'daesung1!';
 // Deliberately narrow: only saving or deleting 룸별 카드 content is recorded.
@@ -1349,7 +1367,17 @@ function openBookingDialog(room, start, end){
     alert('마감된 일지입니다. 관리자만 예약을 추가할 수 있습니다.');
     return;
   }
-  bookingDialog = { room, start, end };
+  // endLocked marks an end time the user chose deliberately — by dragging a
+  // range here, or by picking one in the dialog. The headcount only fills in
+  // the end time while it's unlocked, so a dragged range is never overwritten.
+  const people = 1;
+  bookingDialog = { room, start, people, endLocked: !!end, end: end || endForPeople(start, people) };
+  render();
+}
+function setBookingPeople(n){
+  if(!bookingDialog) return;
+  bookingDialog.people = Math.max(1, Math.min(99, Number(n)||1));
+  if(!bookingDialog.endLocked) bookingDialog.end = endForPeople(bookingDialog.start, bookingDialog.people);
   render();
 }
 function closeBookingDialog(){
@@ -1376,9 +1404,10 @@ function submitBooking(){
     return;
   }
   const groupId = rooms.length > 1 ? uid() : null;
+  const people = Math.max(1, Number(bookingDialog.people)||1);
   rooms.forEach(r=>{
     state.log.rooms[r].push({
-      id: uid(), customer: name, phone, payments: [], birdieCount: 0,
+      id: uid(), customer: name, phone, people, payments: [], birdieCount: 0,
       bookingStart: start, bookingEnd: end,
       ...(groupId ? { groupId } : {}),
       createdBy: session ? session.name : ''
@@ -1477,6 +1506,15 @@ function setBirdie(room, visitId, v){
   if(!guardEdit()) return;
   getVisit(room, visitId).birdieCount = Number(v)||0;
   markDirty(visitId);
+}
+// Headcount describes the party, so like the name it stays the same across
+// the rooms of a multi-room booking. Editing it never moves the booked time —
+// that only follows the headcount while the booking is being created.
+function setPeople(room, visitId, v){
+  if(!guardEdit()) return;
+  const n = Math.max(1, Math.min(99, Number(v)||1));
+  linkedVisits(room, visitId).forEach(({v:m})=>{ m.people = n; dirtyVisits.add(m.id); });
+  render();
 }
 function addPractice(){
   if(!guardEdit()) return;
@@ -1846,6 +1884,7 @@ function roomFreeFor(room, start, end, ignoreGroupId){
 function renderBookingDialog(){
   if(!bookingDialog) return '';
   const { room, start, end } = bookingDialog;
+  const people = Math.max(1, Number(bookingDialog.people)||1);
   const endOptions = endTimeOptions(start);
   const defaultEnd = (end && endOptions.includes(end)) ? end : endOptions[Math.min(1, endOptions.length-1)];
   // Checkboxes are filtered against the currently shown end time; changing the
@@ -1860,8 +1899,20 @@ function renderBookingDialog(){
         <input type="text" id="bookingCustomer" placeholder="예약자 이름" value="${escAttr(bookingDialog.customer||'')}" oninput="bookingDialog.customer=this.value" onkeydown="if(event.key==='Enter'){submitBooking()}">
         <label>전화번호 (선택)</label>
         <input type="tel" id="bookingPhone" placeholder="010-0000-0000" value="${escAttr(bookingDialog.phone||'')}" oninput="bookingDialog.phone=this.value" onkeydown="if(event.key==='Enter'){submitBooking()}">
+        <label>인원수</label>
+        <div class="people-pick">
+          <div class="birdie-stepper">
+            <button type="button" ${people<=1?'disabled':''} onpointerdown="event.preventDefault();setBookingPeople(${people-1})">−</button>
+            <input type="number" min="1" value="${people}" onchange="setBookingPeople(this.value)">
+            <button type="button" onpointerdown="event.preventDefault();setBookingPeople(${people+1})">+</button>
+          </div>
+          <span>명</span>
+          <span class="people-note">${bookingDialog.endLocked
+            ? '드래그로 정한 시간을 사용합니다'
+            : `기본 ${people}시간 (1인 1시간)`}</span>
+        </div>
         <label>종료 시간</label>
-        <select id="bookingEnd" onchange="bookingDialog.end=this.value;render()">
+        <select id="bookingEnd" onchange="bookingDialog.end=this.value;bookingDialog.endLocked=true;render()">
           ${endOptions.map(o=>`<option value="${o}" ${o===defaultEnd?'selected':''}>${o}</option>`).join('')}
         </select>
         <label>함께 쓸 방 (선택)</label>
@@ -1964,6 +2015,7 @@ function renderVisitCard(room, v){
   const dirty = dirtyVisits.has(v.id);
   const total = v.payments.reduce((s,p)=>s+(Number(p.amount)||0), 0);
   const bookingLabel = v.bookingStart ? `예약 ${v.bookingStart}~${v.bookingEnd}` : '시간 미지정';
+  const people = Math.max(1, Number(v.people)||1);
   const members = v.groupId ? groupMembers(v.groupId) : [];
   const groupTag = members.length > 1
     ? `<span class="group-tag" title="${escAttr(members.map(m=>ROOM_LABEL[m.room]||m.room).join('·'))} 을(를) 함께 쓰는 예약입니다. 이름·시간 변경과 삭제는 함께 적용되고, 결제는 방마다 따로 입력합니다.">🔗 ${escHtml(members.map(m=>ROOM_LABEL[m.room]||m.room).join('·'))}</span>`
@@ -2003,13 +2055,24 @@ function renderVisitCard(room, v){
       <button class="btn small" ${locked?'disabled':''} onclick="addPayment('${room}','${v.id}')">+ 결제 추가</button>
 
       <div class="birdie-row">
-        🐦 버디 횟수:
-        <div class="birdie-stepper">
-          <button type="button" ${locked?'disabled':''} ${(v.birdieCount||0)<=0?'disabled':''} onclick="setBirdie('${room}','${v.id}', ${Math.max(0,(v.birdieCount||0)-1)})">−</button>
-          <input type="number" min="0" value="${v.birdieCount||0}" ${locked?'disabled':''} onchange="setBirdie('${room}','${v.id}',this.value)">
-          <button type="button" ${locked?'disabled':''} onclick="setBirdie('${room}','${v.id}', ${(v.birdieCount||0)+1})">+</button>
-        </div>
-        회 → 지급액 <b>${fmt((v.birdieCount||0)*100)}</b>원
+        <span class="meta-item">
+          👥 인원:
+          <span class="birdie-stepper" data-role="people">
+            <button type="button" ${locked||people<=1?'disabled':''} onclick="setPeople('${room}','${v.id}', ${Math.max(1,people-1)})">−</button>
+            <input type="number" min="1" value="${people}" ${locked?'disabled':''} onchange="setPeople('${room}','${v.id}',this.value)">
+            <button type="button" ${locked?'disabled':''} onclick="setPeople('${room}','${v.id}', ${people+1})">+</button>
+          </span>
+          명
+        </span>
+        <span class="meta-item">
+          🐦 버디 횟수:
+          <span class="birdie-stepper" data-role="birdie">
+            <button type="button" ${locked?'disabled':''} ${(v.birdieCount||0)<=0?'disabled':''} onclick="setBirdie('${room}','${v.id}', ${Math.max(0,(v.birdieCount||0)-1)})">−</button>
+            <input type="number" min="0" value="${v.birdieCount||0}" ${locked?'disabled':''} onchange="setBirdie('${room}','${v.id}',this.value)">
+            <button type="button" ${locked?'disabled':''} onclick="setBirdie('${room}','${v.id}', ${(v.birdieCount||0)+1})">+</button>
+          </span>
+          회 → 지급액 <b>${fmt((v.birdieCount||0)*100)}</b>원
+        </span>
       </div>
 
       <div class="visit-foot">
