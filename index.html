@@ -185,7 +185,13 @@
      min-width:601px block. --board-min is set inline from the slot count. */
   .board-table{border-collapse:collapse;font-size:11px;user-select:none;table-layout:fixed;width:var(--board-min);}
   .board-table th, .board-table td{border:1px solid var(--line);padding:0;text-align:center;white-space:nowrap;}
-  .board-table th{background:var(--bg);padding:4px 3px;font-size:10px;font-weight:normal;color:var(--ink-muted);}
+  .board-table th{background:var(--bg);padding:4px 1px;font-size:10px;font-weight:normal;color:var(--ink-muted);overflow:hidden;}
+  /* Every 30-min column is labelled now. A 32px slot can't hold "10:30", so
+     narrow boards show the compact form (hour digits / ":30") and only the
+     stretched desktop board prints the full times — see min-width:601px. */
+  .board-table th .slot-full{display:none;}
+  .board-table th .slot-short{display:inline;}
+  .board-table th.slot-half{color:#b0b0b0;}
   .board-room-col{position:sticky;left:0;background:var(--bg);z-index:2;width:56px;padding:4px 10px !important;text-align:left;font-weight:bold;font-size:12px;}
   .board-cell{height:38px;cursor:pointer;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:0 3px;}
   .board-cell.free{background:#fff;}
@@ -271,6 +277,20 @@
     height:32px;box-sizing:border-box;display:inline-flex;align-items:center;
   }
   .date-row .mobile-only-close{display:inline-flex;}
+  /* Grouped tight around the date field so ‹ date › reads as one control and
+     costs the crowded row as little width as possible. */
+  .date-nav{display:flex;align-items:center;gap:4px;flex-shrink:0;}
+  .date-arrow{width:28px;padding:0;justify-content:center;font-size:18px;line-height:1;color:var(--ink-muted);}
+  .date-arrow:hover{color:var(--ink);}
+  /* The arrows cost width in an already-full row, so on a phone the row
+     tightens up and the weekday shows just its first character (화 not 화요일).
+     Desktop, which has room to spare, keeps the full label. */
+  @media (pointer: coarse), (max-width: 600px){
+    .date-row{gap:6px;padding-left:10px;padding-right:10px;}
+    .date-arrow{width:26px;}
+    .wd-suffix{display:none;}
+    .weekday{padding:4px 8px;}
+  }
 
   .tabs{flex-wrap:nowrap;overflow-x:visible;gap:0;}
   .tab{flex:1 1 0;text-align:center;padding:9px 2px;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
@@ -292,6 +312,9 @@
     /* Only a real monitor gets the stretched board — on a phone the slots
        stay at their natural size and the wrapper scrolls instead. */
     .board-table{width:100%;min-width:var(--board-min);}
+    /* Wide slots have room for the full "10:30" instead of the compact form. */
+    .board-table th .slot-full{display:inline;}
+    .board-table th .slot-short{display:none;}
   }
 
   /* iOS Safari zooms the whole page in whenever a focused field's text is
@@ -968,6 +991,14 @@ document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) applyPe
 
 // ---------- mutation helpers ----------
 // (all mutations respect isLocked()/guardEdit() — see "day close / lock" section above)
+// Board's ‹ / › buttons. Routed through changeDate so the unsaved-draft guard
+// and the realtime re-subscribe happen exactly as they do for the date field.
+function shiftDate(days){
+  const d = new Date(state.currentDate + 'T00:00:00');
+  d.setDate(d.getDate() + days);
+  const pad = n => String(n).padStart(2,'0');
+  changeDate(`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`);
+}
 async function changeDate(v){
   if(!confirmDiscardIfDirty()){ render(); return; } // render() resets the <input type=date> back to state.currentDate
   clearDirty();
@@ -1642,7 +1673,9 @@ function renderBoard(){
   return `
     <div class="board-wrap ${locked?'locked-area':''}">
       <table class="board-table" style="--board-min:${BOARD_MIN_WIDTH}px;">
-        <tr><th class="board-room-col">룸</th>${BOARD_SLOTS.map(s=>`<th>${s.endsWith(':00')?s:''}</th>`).join('')}</tr>
+        <tr><th class="board-room-col">룸</th>${BOARD_SLOTS.map(s=>
+          `<th class="${s.endsWith(':00')?'slot-hour':'slot-half'}"><span class="slot-full">${s}</span><span class="slot-short">${s.endsWith(':00')?s.slice(0,2):':30'}</span></th>`
+        ).join('')}</tr>
         ${ROOMS.map(room=>{
           const visits = state.log.rooms[room] || [];
           const c = ROOM_COLORS[room] || { label:'#f0f0f0', row:'#fff' };
@@ -1728,8 +1761,12 @@ function renderEditView(){
     ${renderSaveErrorBanner()}
     <div class="board-card">
       <div class="topbar date-row">
-        <input type="date" value="${log.date}" onchange="changeDate(this.value)">
-        <span class="weekday">${weekdayLabel(log.date)}요일</span>
+        <div class="date-nav">
+          <button class="btn date-arrow" onclick="shiftDate(-1)" title="이전 날" aria-label="이전 날">‹</button>
+          <input type="date" value="${log.date}" onchange="changeDate(this.value)">
+          <button class="btn date-arrow" onclick="shiftDate(1)" title="다음 날" aria-label="다음 날">›</button>
+        </div>
+        <span class="weekday">${weekdayLabel(log.date)}<span class="wd-suffix">요일</span></span>
         <div class="spacer"></div>
         ${log.closed
           ? (isAdmin()
