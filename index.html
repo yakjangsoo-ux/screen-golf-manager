@@ -1716,7 +1716,9 @@ function brandLogo(){
 }
 function renderHeader(){
   if(!session){
-    return `<h1 class="brand">${brandLogo()}</h1>`;
+    // Same wrapper as the logged-in bar, otherwise the centering rule (which is
+    // scoped to .app-header h1) misses and the logo sits flush left.
+    return `<div class="app-header"><h1 class="brand">${brandLogo()}</h1></div>`;
   }
   const menuItems = [
     { key:'edit', label:'일지 관리', show:true },
@@ -2523,7 +2525,8 @@ function escAttr(s){ return escHtml(s); }
     render();
   }catch(e){
     console.warn('초기 로딩 실패:', e);
-    document.getElementById('header').innerHTML = '<h1 class="brand">' + brandLogo() + '</h1>';
+    document.getElementById('header').innerHTML =
+      '<div class="app-header"><h1 class="brand">' + brandLogo() + '</h1></div>';
     document.getElementById('app').innerHTML =
       '<div class="summary"><p>서버에 연결하지 못했습니다. 인터넷 연결을 확인해주세요.</p>' +
       '<button class="btn primary" onclick="location.reload()">다시 시도</button></div>';
