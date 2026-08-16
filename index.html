@@ -28,6 +28,15 @@
     --body-pad:16px;
   }
   *{box-sizing:border-box;}
+  /* Sized in em so an icon always matches the text beside it, and stroked in
+     currentColor so it picks up that text's colour (including on the blue
+     primary buttons and the red warning banner). */
+  .ic{width:1em;height:1em;flex:0 0 auto;vertical-align:-0.14em;margin-right:.32em;
+      fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;}
+  h1 .ic, h2 .ic{width:0.95em;height:0.95em;stroke-width:1.9;}
+  /* Standalone icons (the ✕ on a payment row, the 마감 padlock in a table cell)
+     have no text after them, so they must not carry the label gap. */
+  .x .ic, td .ic{margin-right:0;}
   body{
     margin:0;
     font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Malgun Gothic","Apple SD Gothic Neo",sans-serif;
@@ -404,7 +413,7 @@
 <body>
 <div id="header"></div>
 <div id="app"></div>
-<footer>모든 데이터는 클라우드(Firestore)에 저장되어 어느 기기에서 접속해도 동일하게 보입니다. 예약 카드의 수정 내용은 카드 안의 "💾 저장" 버튼을 눌러야 반영됩니다.</footer>
+<footer>모든 데이터는 클라우드(Firestore)에 저장되어 어느 기기에서 접속해도 동일하게 보입니다. 예약 카드의 수정 내용은 카드 안의 <b>저장</b> 버튼을 눌러야 반영됩니다.</footer>
 
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
@@ -419,6 +428,40 @@ const FIREBASE_CONFIG = {
   messagingSenderId: "94940029914",
 };
 let db; // set in init() after firebase.initializeApp()
+
+// ---------- icons ----------
+// Emoji rendered as full-colour stickers of wildly different weights, and
+// differently on every OS. These are one stroke family at a single width,
+// drawn in currentColor and sized in em, so they inherit whatever text they
+// sit next to and look identical everywhere.
+const ICONS = {
+  flag:    '<path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><path d="M4 22V2"/>',
+  menu:    '<path d="M3 6h18M3 12h18M3 18h18"/>',
+  lock:    '<rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>',
+  unlock:  '<rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 7.5-2"/>',
+  save:    '<path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8"/><path d="M7 3v5h8"/>',
+  check:   '<path d="M20 6 9 17l-5-5"/>',
+  users:   '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
+  user:    '<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>',
+  link:    '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
+  alert:   '<path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
+  logout:  '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/>',
+  clipboard:'<rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>',
+  history: '<path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><path d="M12 7v5l3.5 2"/>',
+  key:     '<circle cx="7.5" cy="15.5" r="4.5"/><path d="m10.7 12.3 8.3-8.3"/><path d="m17 6 3 3"/><path d="m14.5 8.5 3 3"/>',
+  download:'<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/>',
+  calendar:'<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>',
+  pencil:  '<path d="M17 3a2.8 2.8 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5z"/>',
+  chart:   '<path d="M3 3v18h18"/><path d="M7 15v-4M12 15V7M17 15v-6"/>',
+  wrench:  '<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>',
+  book:    '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>',
+  close:   '<path d="M18 6 6 18M6 6l12 12"/>',
+};
+function icon(name, extraClass){
+  const d = ICONS[name];
+  if(!d) return '';
+  return `<svg class="ic${extraClass ? ' ' + extraClass : ''}" viewBox="0 0 24 24" aria-hidden="true">${d}</svg>`;
+}
 
 const ROOMS = ['R1','R2','R3','R5','R6','R7','R8','R9'];
 const ROOM_LABEL = {};
@@ -914,7 +957,7 @@ function renderSaveErrorBanner(){
   if(!lastSaveFailed) return '';
   return `
     <div class="save-error-banner">
-      <span>⚠ 저장하지 못했습니다. 화면의 내용이 아직 서버에 반영되지 않았습니다 — 인터넷 연결을 확인한 뒤 다시 저장해주세요.</span>
+      <span>${icon("alert")} 저장하지 못했습니다. 화면의 내용이 아직 서버에 반영되지 않았습니다 — 인터넷 연결을 확인한 뒤 다시 저장해주세요.</span>
       <button class="btn small" onpointerdown="event.preventDefault();retryFailedSave()">다시 저장</button>
     </div>
   `;
@@ -968,7 +1011,8 @@ function markDirtyQuiet(visitId){
   if(visitId) dirtyVisits.add(visitId);
   const card = document.getElementById('visit-' + visitId);
   const btn = document.getElementById('saveBtn-' + visitId);
-  if(btn){ btn.disabled = false; btn.classList.add('primary'); btn.textContent = '💾 저장'; }
+  // innerHTML, not textContent: the label carries an inline SVG icon.
+  if(btn){ btn.disabled = false; btn.classList.add('primary'); btn.innerHTML = icon('save') + ' 저장'; }
   if(card && !card.querySelector('.unsaved-dot')){
     const bar = card.querySelector('.visit-summary-bar');
     if(bar){
@@ -1022,12 +1066,12 @@ async function saveLogChanges(){
 // save is precisely what let earlier data loss go unnoticed.
 function flashSavedConfirmation(){
   document.querySelectorAll('[id^="saveBtn-"]').forEach(btn=>{
-    btn.textContent = '✔ 저장됨';
+    btn.innerHTML = icon('check') + ' 저장됨';   // innerHTML: the label carries an inline SVG
     btn.classList.add('saved-flash');
   });
   setTimeout(()=>{
     document.querySelectorAll('.saved-flash').forEach(btn=>{
-      btn.textContent = '💾 저장';
+      btn.innerHTML = icon('save') + ' 저장';
       btn.classList.remove('saved-flash');
     });
   }, 1500);
@@ -1554,13 +1598,13 @@ function updatePracticeQuiet(id, field, value){
 }
 function practiceWarning(amount){
   const n = Number(amount)||0;
-  return (n > 0 && (n < 10000 || n > 15000)) ? '⚠ 일반 범위(10,000~15,000)를 벗어남 - 확인 필요' : '';
+  return (n > 0 && (n < 10000 || n > 15000)) ? icon('alert') + ' 일반 범위(10,000~15,000)를 벗어남 - 확인 필요' : '';
 }
 function markPracticeDirty(id, quiet){
   if(id) dirtyPractice.add(id);
   if(quiet){
     const btn = document.getElementById('saveBtn-practice');
-    if(btn){ btn.classList.add('primary'); btn.textContent = '💾 저장'; }
+    if(btn){ btn.classList.add('primary'); btn.innerHTML = icon('save') + ' 저장'; }
     // Same targeted approach as the visit cards: create the marker rather
     // than keeping an empty one in the DOM at all times.
     const head = document.querySelector('.practice-head');
@@ -1650,7 +1694,7 @@ function selectMobileView(key){
 }
 function renderHeader(){
   if(!session){
-    return `<h1>🏌️ 대성스크린골프 일지 관리</h1>`;
+    return `<h1>${icon("flag")} 대성스크린골프 일지 관리</h1>`;
   }
   const menuItems = [
     { key:'edit', label:'일지 관리', show:true },
@@ -1659,11 +1703,14 @@ function renderHeader(){
     { key:'manual', label:'메뉴얼', show:true },
   ];
   const headerTitles = { edit:'대성스크린골프 일지 관리', list:'통계/분석', admin:'관리자 페이지', manual:'메뉴얼' };
+  // The header icon follows the view, so the title never reads as the shop
+  // name with an unrelated page name beside it.
+  const headerIcons = { edit:'flag', list:'chart', admin:'wrench', manual:'book' };
   const title = headerTitles[state.view] || '대성스크린골프 일지 관리';
   return `
     <div class="app-header">
-      <h1>🏌️ ${title}</h1>
-      <button class="hamburger-btn ${mobileMenuOpen?'active':''}" onclick="toggleMobileMenu()" aria-label="메뉴">☰</button>
+      <h1>${icon(headerIcons[state.view] || 'flag')} ${title}</h1>
+      <button class="hamburger-btn ${mobileMenuOpen?'active':''}" onclick="toggleMobileMenu()" aria-label="메뉴">${icon("menu")}</button>
     </div>
     <div class="mobile-drawer-backdrop ${mobileMenuOpen?'open':''}" onclick="closeMobileMenu()"></div>
     <div class="mobile-drawer ${mobileMenuOpen?'open':''}">
@@ -1673,13 +1720,13 @@ function renderHeader(){
         `).join('')}
       </div>
       <div class="mobile-drawer-footer">
-        <span class="autosave-badge">👤 ${escHtml(session.name)}${isAdmin()?' (관리자)':''}</span>
-        ${state.log ? `<span class="autosave-badge">🗒 담당자: ${escHtml(state.log.staff || session.name)}</span>` : ''}
+        <span class="autosave-badge">${icon("user")} ${escHtml(session.name)}${isAdmin()?' (관리자)':''}</span>
+        ${state.log ? `<span class="autosave-badge">${icon("user")} 담당자: ${escHtml(state.log.staff || session.name)}</span>` : ''}
         <span class="autosave-badge" style="${lastSaveFailed?'color:var(--danger);font-weight:600;':''}">${
-          lastSaveFailed ? '⚠ 저장 실패 - 인터넷 연결 확인'
-          : (lastSavedAt ? '✔ 마지막 저장 ' + lastSavedAt.toLocaleTimeString('ko-KR') : '아직 저장한 내용 없음')
+          lastSaveFailed ? icon('alert') + ' 저장 실패 - 인터넷 연결 확인'
+          : (lastSavedAt ? icon('check') + ' 마지막 저장 ' + lastSavedAt.toLocaleTimeString('ko-KR') : '아직 저장한 내용 없음')
         }</span>
-        <button class="btn danger" onclick="closeMobileMenu();logout()">🚪 로그아웃</button>
+        <button class="btn danger" onclick="closeMobileMenu();logout()">${icon("logout")} 로그아웃</button>
       </div>
     </div>
   `;
@@ -1724,7 +1771,7 @@ async function openAdminView(){
 function renderLogin(){
   return `
     <div class="topbar login-box">
-      <h2 style="margin:0 0 4px;font-size:18px;">🔐 로그인</h2>
+      <h2 style="margin:0 0 4px;font-size:18px;">${icon("lock")} 로그인</h2>
       <div>
         <label>아이디</label>
         <input type="text" id="loginId" placeholder="admin 또는 직원 이름" autocomplete="username"
@@ -1751,19 +1798,19 @@ function renderNav(){
   return `
     <div class="view-toggle">
       <div class="nav-links">
-        <button class="btn ${state.view==='edit'?'primary':''}" onclick="selectMobileView('edit')"><span class="lbl-full">✏️ 일지 입력</span><span class="lbl-short">✏️ 일지</span></button>
-        <button class="btn manual-btn ${state.view==='manual'?'primary':''}" onclick="state.view='manual';render()">📖 사용법</button>
+        <button class="btn ${state.view==='edit'?'primary':''}" onclick="selectMobileView('edit')">${icon("pencil")} <span class="lbl-full">일지 입력</span><span class="lbl-short">일지</span></button>
+        <button class="btn manual-btn ${state.view==='manual'?'primary':''}" onclick="state.view='manual';render()">${icon("book")} 사용법</button>
         ${isAdmin() ? `
-          <button class="btn ${state.view==='list'?'primary':''}" onclick="openListView()"><span class="lbl-full">📊 조회/통계</span><span class="lbl-short">📊 통계</span></button>
-          <button class="btn ${state.view==='admin'?'primary':''}" onclick="openAdminView()"><span class="lbl-full">🛠 관리자 페이지</span><span class="lbl-short">🛠 관리자</span></button>
+          <button class="btn ${state.view==='list'?'primary':''}" onclick="openListView()">${icon("chart")} <span class="lbl-full">조회/통계</span><span class="lbl-short">통계</span></button>
+          <button class="btn ${state.view==='admin'?'primary':''}" onclick="openAdminView()">${icon("wrench")} <span class="lbl-full">관리자 페이지</span><span class="lbl-short">관리자</span></button>
         ` : ''}
       </div>
       <div class="nav-status">
         ${log && log.closed
-          ? `<span class="method-tag transfer">🔒 마감됨</span>${isAdmin() ? `<button class="btn small" onclick="reopenDay()">🔓 마감 취소</button>` : ''}`
-          : `<button class="btn" onclick="closeDay()">🔒 마감 처리</button>`}
-        <span class="autosave-badge identity-inline">👤 ${escHtml(session.name)}${isAdmin()?' (관리자)':''}</span>
-        <button class="btn danger identity-inline" onclick="logout()">🚪 로그아웃</button>
+          ? `<span class="method-tag transfer">${icon("lock")} 마감됨</span>${isAdmin() ? `<button class="btn small" onclick="reopenDay()">${icon("unlock")} 마감 취소</button>` : ''}`
+          : `<button class="btn" onclick="closeDay()">${icon("lock")} 마감 처리</button>`}
+        <span class="autosave-badge identity-inline">${icon("user")} ${escHtml(session.name)}${isAdmin()?' (관리자)':''}</span>
+        <button class="btn danger identity-inline" onclick="logout()">${icon("logout")} 로그아웃</button>
       </div>
     </div>
   `;
@@ -1780,11 +1827,11 @@ function manualSection(title, bodyHtml){
 function renderManualView(){
   return `
     ${renderNav()}
-    ${manualSection('🔐 로그인', `
+    ${manualSection(icon("lock")+" 로그인", `
       <p>아이디에 <b>본인 이름</b>을 입력하고, 관리자에게 받은 비밀번호를 입력합니다.<br>
       관리자는 아이디 <b>admin</b> + 관리자 비밀번호로 로그인합니다.</p>
     `)}
-    ${manualSection('🗓 상황판(맨 위 표) 사용법', `
+    ${manualSection(icon("calendar")+" 상황판(맨 위 표) 사용법", `
       <ul style="margin:0;padding-left:18px;line-height:1.8;">
         <li><b>빈 칸(흰색) 클릭</b> — 그 시간에 새 예약을 만듭니다. 이름과 종료 시간을 입력하고 "예약 생성"을 누르면 됩니다.</li>
         <li><b>빈 칸을 눌러서 드래그</b> — 시작~종료 시간을 한 번에 선택할 수 있습니다. 예: 10시 칸부터 12시 칸까지 눌러서 끌면 종료 시간이 12:30(선택한 마지막 칸 다음)으로 자동 설정됩니다. 휴대폰에서는 빈 칸을 <b>잠깐 길게 누른 뒤</b> 끌면 됩니다(바로 쓸어넘기면 화면이 스크롤됩니다).</li>
@@ -1792,28 +1839,28 @@ function renderManualView(){
         <li><b>예약된 칸을 끌어서 시간 변경</b> — 예약된 칸을 누른 채(휴대폰은 길게 누른 뒤) 원하는 시간대까지 끌면 그 예약의 시간이 바뀝니다. 끌기 시작하면 기존 블록이 잠시 사라지고 선택 범위가 표시되며, 손을 떼면 변경할지 묻는 확인창이 뜹니다. 다른 예약과 겹치는 시간으로는 옮길 수 없습니다.</li>
       </ul>
     `)}
-    ${manualSection('✏️ 방문(예약) 카드 입력', `
+    ${manualSection(icon("pencil")+" 방문(예약) 카드 입력", `
       <ul style="margin:0;padding-left:18px;line-height:1.8;">
         <li>룸 탭(R1, R2 ...)을 선택한 뒤 <b>"+ 방문(예약) 추가"</b>를 누르면 새 카드가 생깁니다.</li>
         <li>예약자 이름, 연락처(선택), 예약 시간을 입력합니다. 상황판과 자동으로 연결됩니다.</li>
         <li><b>"+ 결제 추가"</b>로 결제 항목을 추가합니다: 항목 종류(게임비/홀인원응모(S)/기타), 결제수단(현금/카드/이체), 금액, 메모(예: 맥주, 8000x2) 순서로 입력합니다. 결제는 한 방문에 여러 건 추가할 수 있습니다.</li>
         <li><b>버디 횟수</b>를 입력하면 지급액(1회당 100원)이 자동 계산됩니다.</li>
         <li>카드 맨 위 요약 줄을 클릭하면 카드를 접었다 펼 수 있습니다.</li>
-        <li>이름·연락처·예약시간·결제·버디 횟수를 수정하면 바로 저장되지 않고, 카드 오른쪽 위에 <b>"● 미저장"</b> 표시가 나타납니다. 카드 아래쪽 <b>"💾 저장"</b> 버튼(파란색으로 바뀝니다)을 눌러야 실제로 반영됩니다.</li>
+        <li>이름·연락처·예약시간·결제·버디 횟수를 수정하면 바로 저장되지 않고, 카드 오른쪽 위에 <b>"● 미저장"</b> 표시가 나타납니다. 카드 아래쪽 <b>저장</b> 버튼(파란색으로 바뀝니다)을 눌러야 실제로 반영됩니다.</li>
         <li>방문 추가/삭제와 상황판에서 만든 예약은 곧바로 저장됩니다.</li>
         <li>저장하거나 삭제할 때마다 누가 했는지가 관리자 페이지의 변경 이력에 기록됩니다.</li>
       </ul>
     `)}
-    ${manualSection('⛳ 연습장 매출', `
+    ${manualSection(icon("flag")+" 연습장 매출", `
       <p>일지 입력 화면 아래쪽 "연습장 매출" 항목에서 <b>"+ 연습장 매출 추가"</b>로 입력합니다. 결제수단과 금액을 선택하면 됩니다.</p>
     `)}
-    ${manualSection('🔒 마감 처리', `
+    ${manualSection(icon("lock")+" 마감 처리", `
       <p>그날 입력을 다 마쳤으면 <b>"마감 처리"</b>를 누릅니다. 마감 후에는 직원이 수정할 수 없고, 관리자만 수정하거나 "마감 취소"를 할 수 있습니다.</p>
     `)}
-    ${isAdmin() ? manualSection('🛠 관리자 전용 기능', `
+    ${isAdmin() ? manualSection(icon("wrench")+" 관리자 전용 기능", `
       <ul style="margin:0;padding-left:18px;line-height:1.8;">
-        <li><b>📊 조회/통계</b> — 월별로 날짜별 매출 합계를 확인할 수 있습니다. 날짜를 클릭하면 해당 일지 편집 화면으로 이동합니다.</li>
-        <li><b>🛠 관리자 페이지</b> — 관리자 비밀번호 변경, 기간별 엑셀 출력(최대 1개월, 날짜별 탭으로 구분), 직원 계정 추가/비밀번호 재설정/삭제, 변경 이력(예약 카드 저장·삭제) 확인이 가능합니다.</li>
+        <li><b>조회/통계</b> — 월별로 날짜별 매출 합계를 확인할 수 있습니다. 날짜를 클릭하면 해당 일지 편집 화면으로 이동합니다.</li>
+        <li><b>관리자 페이지</b> — 관리자 비밀번호 변경, 기간별 엑셀 출력(최대 1개월, 날짜별 탭으로 구분), 직원 계정 추가/비밀번호 재설정/삭제, 변경 이력(예약 카드 저장·삭제) 확인이 가능합니다.</li>
       </ul>
     `) : ''}
   `;
@@ -1865,7 +1912,7 @@ function renderBoardRow(room, visits, occupiedColor){
       const span = Math.max(1, Math.round((toMinutes(owner.bookingEnd) - toMinutes(owner.bookingStart)) / 30));
       const mates = owner.groupId ? groupMembers(owner.groupId) : [];
       const groupNote = mates.length > 1 ? ` · ${mates.map(m=>ROOM_LABEL[m.room]||m.room).join('·')} 함께 예약` : '';
-      const tip = `${owner.customer||''}${owner.phone?' ☎'+owner.phone:''} (${owner.bookingStart}~${owner.bookingEnd})${groupNote} — 길게 눌러 끌면 시간 변경`;
+      const tip = `${owner.customer||''}${owner.phone?' '+owner.phone:''} (${owner.bookingStart}~${owner.bookingEnd})${groupNote} — 길게 눌러 끌면 시간 변경`;
       html += `<td class="board-cell occupied${hourClass(owner.bookingStart)}" colspan="${span}" title="${escAttr(tip)}" style="--span:${span};"`
            +  ` data-room="${room}" data-visit="${owner.id}" data-start="${owner.bookingStart}" data-end="${owner.bookingEnd}"`
            +  ` onmousedown="event.preventDefault();startBoardEditDrag(event,this)"`
@@ -1973,16 +2020,16 @@ function renderEditView(){
         <div class="spacer"></div>
         ${log.closed
           ? (isAdmin()
-              ? `<button class="btn mobile-only-close" onclick="reopenDay()">🔓 마감 취소</button>`
-              : `<span class="method-tag transfer mobile-only-close">🔒 마감됨</span>`)
-          : `<button class="btn mobile-only-close" onclick="closeDay()">🔒 마감 처리</button>`}
+              ? `<button class="btn mobile-only-close" onclick="reopenDay()">${icon("unlock")} 마감 취소</button>`
+              : `<span class="method-tag transfer mobile-only-close">${icon("lock")} 마감됨</span>`)
+          : `<button class="btn mobile-only-close" onclick="closeDay()">${icon("lock")} 마감 처리</button>`}
       </div>
       ${renderBoard()}
     </div>
 
     ${log.closed ? `
       <div class="lock-banner ${isAdmin()?'admin-mode':''}">
-        🔒 이 일지는 <b>${escHtml(log.closedBy||'-')}</b>님이 ${log.closedAt ? new Date(log.closedAt).toLocaleString('ko-KR') : ''}에 마감했습니다.
+        ${icon("lock")} 이 일지는 <b>${escHtml(log.closedBy||'-')}</b>님이 ${log.closedAt ? new Date(log.closedAt).toLocaleString('ko-KR') : ''}에 마감했습니다.
         ${isAdmin() ? ' 관리자 모드로 로그인되어 있어 수정할 수 있습니다.' : ' 수정하려면 관리자 로그인이 필요합니다.'}
       </div>
     ` : ''}
@@ -2030,7 +2077,7 @@ function renderVisitCard(room, v){
   const people = Math.max(1, Number(v.people)||1);
   const members = v.groupId ? groupMembers(v.groupId) : [];
   const groupTag = members.length > 1
-    ? `<span class="group-tag" title="${escAttr(members.map(m=>ROOM_LABEL[m.room]||m.room).join('·'))} 을(를) 함께 쓰는 예약입니다. 이름·시간 변경과 삭제는 함께 적용되고, 결제는 방마다 따로 입력합니다.">🔗 ${escHtml(members.map(m=>ROOM_LABEL[m.room]||m.room).join('·'))}</span>`
+    ? `<span class="group-tag" title="${escAttr(members.map(m=>ROOM_LABEL[m.room]||m.room).join('·'))} 을(를) 함께 쓰는 예약입니다. 이름·시간 변경과 삭제는 함께 적용되고, 결제는 방마다 따로 입력합니다.">${icon("link")} ${escHtml(members.map(m=>ROOM_LABEL[m.room]||m.room).join('·'))}</span>`
     : '';
   const summaryBar = `
     <div class="visit-summary-bar" onclick="toggleVisitCollapse('${v.id}')">
@@ -2068,7 +2115,7 @@ function renderVisitCard(room, v){
 
       <div class="birdie-row">
         <span class="meta-item">
-          👥 인원:
+          ${icon("users")} 인원:
           <span class="birdie-stepper" data-role="people">
             <button type="button" ${locked||people<=1?'disabled':''} onclick="setPeople('${room}','${v.id}', ${Math.max(1,people-1)})">−</button>
             <input type="number" min="1" value="${people}" ${locked?'disabled':''} onchange="setPeople('${room}','${v.id}',this.value)">
@@ -2089,7 +2136,7 @@ function renderVisitCard(room, v){
 
       <div class="visit-foot">
         <button class="btn small danger" ${locked?'disabled':''} onclick="removeVisit('${room}','${v.id}')">방문 삭제</button>
-        <button class="btn small ${dirty?'primary':''}" id="saveBtn-${v.id}" ${locked?'disabled':''} onpointerdown="event.preventDefault();saveLogChanges()">💾 저장</button>
+        <button class="btn small ${dirty?'primary':''}" id="saveBtn-${v.id}" ${locked?'disabled':''} onpointerdown="event.preventDefault();saveLogChanges()">${icon("save")} 저장</button>
       </div>
     </div>
   `;
@@ -2109,7 +2156,7 @@ function renderPaymentRow(room, visitId, p){
         <input class="amount" type="number" min="0" step="100" value="${p.amount}" ${locked?'disabled':''} onchange="updatePayment('${room}','${visitId}','${p.id}','amount',this.value)"> 원
       </span>
       <input class="memo" type="text" placeholder="메모" title="예: 맥주 8000x2" value="${escAttr(p.memo||'')}" ${locked?'disabled':''} oninput="updatePaymentQuiet('${room}','${visitId}','${p.id}','memo',this.value)">
-      <span class="x" onclick="removePayment('${room}','${visitId}','${p.id}')">✕</span>
+      <span class="x" onclick="removePayment('${room}','${visitId}','${p.id}')">${icon('close')}</span>
     </div>
   `;
 }
@@ -2159,13 +2206,13 @@ function renderPracticeSection(){
             </div>
             <input class="amount" type="number" min="0" step="500" value="${p.amount}" ${locked?'disabled':''} oninput="updatePracticeQuiet('${p.id}','amount',this.value)"> 원
             <span class="warn practice-warn">${practiceWarning(p.amount)}</span>
-            <span class="x" style="cursor:pointer;color:#888;" onclick="removePractice('${p.id}')">✕</span>
+            <span class="x" style="cursor:pointer;color:#888;" onclick="removePractice('${p.id}')">${icon('close')}</span>
           </div>
         `).join('')}
       </div>
       <div class="practice-foot">
         <button class="btn small" ${locked?'disabled':''} onclick="addPractice()">+ 연습장 매출 추가</button>
-        <button class="btn small ${dirty?'primary':''}" id="saveBtn-practice" ${locked?'disabled':''} onpointerdown="event.preventDefault();saveLogChanges()">💾 저장</button>
+        <button class="btn small ${dirty?'primary':''}" id="saveBtn-practice" ${locked?'disabled':''} onpointerdown="event.preventDefault();saveLogChanges()">${icon("save")} 저장</button>
       </div>
     </div>
   `;
@@ -2174,7 +2221,7 @@ function renderPracticeSection(){
 function renderSummaryTable(summary){
   return `
     <div class="summary">
-      <h2>📋 수입 및 지출 요약</h2>
+      <h2>${icon("clipboard")} 수입 및 지출 요약</h2>
       <table>
         <tr><th class="label">항목</th><th>현금</th><th>카드</th><th>이체</th><th>합계</th></tr>
         ${ROOMS.map(r=>{
@@ -2211,7 +2258,7 @@ function renderListView(){
     monthTotals.cash+=s.totals.cash; monthTotals.card+=s.totals.card; monthTotals.transfer+=s.totals.transfer;
     monthSg += s.sgTotal; monthBirdie += s.birdieTotal;
     return `<tr>
-      <td class="label"><a href="#" onclick="loadDateIntoEditor('${d}');return false;">${d.slice(5)} (${weekdayLabel(d)})</a> ${log.closed?'🔒':''}</td>
+      <td class="label"><a href="#" onclick="loadDateIntoEditor('${d}');return false;">${d.slice(5)} (${weekdayLabel(d)})</a> ${log.closed?icon('lock'):''}</td>
       <td>${fmt(s.totals.cash)}</td><td>${fmt(s.totals.card)}</td><td>${fmt(s.totals.transfer)}</td>
       <td><b>${fmt(s.grandTotal)}</b></td>
     </tr>`;
@@ -2360,13 +2407,13 @@ function renderAdminView(){
   return `
     ${renderNav()}
     <div class="summary" style="margin-bottom:14px;">
-      <h2>🔑 관리자 비밀번호</h2>
+      <h2>${icon("key")} 관리자 비밀번호</h2>
       <p style="font-size:13px;color:#666;">비밀번호는 모든 기기에 공통으로 적용됩니다.</p>
       <button class="btn" onclick="changeAdminPassword()">비밀번호 변경</button>
     </div>
 
     <div class="summary" style="margin-bottom:14px;">
-      <h2>📥 일지 엑셀 출력</h2>
+      <h2>${icon("download")} 일지 엑셀 출력</h2>
       <p style="font-size:12px;color:#888;margin:0 0 8px;">한 번에 최대 ${MAX_EXPORT_DAYS}일(약 1개월)까지 받을 수 있습니다. 날짜별로 탭이 나뉘어 저장됩니다.</p>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
         <label style="font-size:13px;color:#555;">시작일</label>
@@ -2378,7 +2425,7 @@ function renderAdminView(){
     </div>
 
     <div class="summary" style="margin-bottom:14px;">
-      <h2>👥 직원 계정 관리</h2>
+      <h2>${icon("users")} 직원 계정 관리</h2>
       ${staffList.length ? staffList.map(s=>`
         <div class="staff-row">
           <span style="min-width:120px;">${escHtml(s.name)}</span>
@@ -2404,7 +2451,7 @@ function renderAuditSection(audit){
   const rows = audit.slice(start, start + AUDIT_PAGE_SIZE);
   return `
     <div class="list-table-wrap">
-      <h2 style="font-size:15px;margin-top:0;">📜 변경 이력 (예약 카드 저장 · 삭제)</h2>
+      <h2 style="font-size:15px;margin-top:0;">${icon("history")} 변경 이력 (예약 카드 저장 · 삭제)</h2>
       <p style="font-size:12px;color:#888;margin:0 0 8px;">최근 1개월치만 보관되며, 그보다 오래된 기록은 자동으로 삭제됩니다.</p>
       <table>
         <tr><th class="label">시각</th><th class="label">작업자</th><th class="label">종류</th><th class="label">내용</th></tr>
@@ -2451,7 +2498,7 @@ function escAttr(s){ return escHtml(s); }
     render();
   }catch(e){
     console.warn('초기 로딩 실패:', e);
-    document.getElementById('header').innerHTML = '<h1>🏌️ 대성스크린골프 일지 관리</h1>';
+    document.getElementById('header').innerHTML = '<h1>' + icon('flag') + ' 대성스크린골프 일지 관리</h1>';
     document.getElementById('app').innerHTML =
       '<div class="summary"><p>서버에 연결하지 못했습니다. 인터넷 연결을 확인해주세요.</p>' +
       '<button class="btn primary" onclick="location.reload()">다시 시도</button></div>';
