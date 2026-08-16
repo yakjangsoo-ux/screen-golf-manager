@@ -197,6 +197,8 @@
   .locked-area{opacity:0.55;pointer-events:none;}
   .lock-banner{background:#fff3cd;border:1px solid #ffe58a;color:#7a5b00;padding:8px 12px;border-radius:var(--radius-lg);margin-bottom:12px;font-size:13px;}
   .lock-banner.admin-mode{background:#e6f4ff;border-color:#a9d4ff;color:#0b4a8f;}
+  .backup-note{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:6px;font-size:12px;opacity:.85;}
+  .backup-note.failed{color:var(--danger);opacity:1;font-weight:600;}
   .save-error-banner{
     display:flex;align-items:center;gap:10px;flex-wrap:wrap;
     background:#fdeceb;border:1px solid var(--danger);color:#8a2018;
@@ -917,14 +919,21 @@ function isBlockedForEdit(){
   }
   return false;
 }
-function closeDay(){
+async function closeDay(){
   if(state.log.closed) return;
   const closer = session ? session.name : ((state.log.staff||'').trim() || '(담당자 미기재)');
   if(!confirm(`${state.log.date} 일지를 마감할까요?\n마감 후에는 관리자만 수정할 수 있습니다.`)) return;
+  // Resolve the backup folder *now*, before any await on the network. Asking
+  // for folder permission needs the click's user activation, which is gone by
+  // the time the Firestore round-trip returns.
+  const dir = await backupTargetForClose();
   state.log.closed = true;
   state.log.closedAt = new Date().toISOString();
   state.log.closedBy = closer;
-  persistAndRender();
+  const saved = await persistAndRender();
+  // A day that didn't reach the server isn't closed, so backing it up would
+  // file a record of something that didn't happen.
+  if(saved) await runCloseBackup(dir, state.log);
 }
 function reopenDay(){
   if(!isAdmin() || !state.log.closed) return;
@@ -1007,6 +1016,7 @@ async function persistAndRender(){
   // to be completely silent: the card appeared on screen while nothing had
   // reached the server. Say so plainly.
   if(!ok) alert('저장하지 못했습니다. 화면에는 반영됐지만 서버에는 저장되지 않았습니다.\n인터넷 연결을 확인한 뒤 상단의 "다시 저장"을 눌러주세요.');
+  return ok;
 }
 // Which visits hold edits that haven't been committed yet. Per-visit rather
 // than one global flag so each room card's 저장 button can show whether that
@@ -1788,6 +1798,7 @@ async function openAdminView(){
   state.auditPage = 0; // always open the 변경 이력 on the newest page
   render();
   try{
+    await refreshBackupFolderName(); // local-only, so it can't fail the page
     await pruneOldAudit(); // drop anything past the 1-month window before reading
     const [staffList, audit] = await Promise.all([getStaffList(), getAudit()]);
     if(myGen !== loadGeneration) return;
@@ -1888,6 +1899,12 @@ function renderManualView(){
     `)}
     ${manualSection(icon("lock")+" 마감 처리", `
       <p>그날 입력을 다 마쳤으면 <b>"마감 처리"</b>를 누릅니다. 마감 후에는 직원이 수정할 수 없고, 관리자만 수정하거나 "마감 취소"를 할 수 있습니다.</p>
+      <p style="margin-bottom:0;"><b>마감하면 일지 파일이 PC에 자동 저장됩니다.</b>
+      단, 처음 한 번은 관리자 페이지의 "마감 시 자동 백업"에서 저장할 폴더를 직접 지정해줘야 합니다(예: C:\\스크린골프).
+      그 뒤로는 마감할 때마다 그 폴더 안에 <b>월별 폴더</b>가 만들어지고
+      <b>날짜 일지.xlsx</b>(열어보는 용도)와 <b>날짜 일지.json</b>(복구용)이 저장됩니다.
+      이 기능은 <b>PC의 크롬·엣지에서만</b> 동작합니다. 휴대폰에서 마감하면 마감은 되지만 파일은 저장되지 않으니,
+      나중에 PC에서 그 날짜를 열고 관리자 페이지의 "지금 백업"을 눌러주세요.</p>
     `)}
     ${isAdmin() ? manualSection(icon("wrench")+" 관리자 전용 기능", `
       <ul style="margin:0;padding-left:18px;line-height:1.8;">
@@ -2063,6 +2080,7 @@ function renderEditView(){
       <div class="lock-banner ${isAdmin()?'admin-mode':''}">
         ${icon("lock")} 이 일지는 <b>${escHtml(log.closedBy||'-')}</b>님이 ${log.closedAt ? new Date(log.closedAt).toLocaleString('ko-KR') : ''}에 마감했습니다.
         ${isAdmin() ? ' 관리자 모드로 로그인되어 있어 수정할 수 있습니다.' : ' 수정하려면 관리자 로그인이 필요합니다.'}
+        ${renderBackupNote()}
       </div>
     ` : ''}
 
@@ -2409,6 +2427,161 @@ function buildDateSheetRows(log, summary){
   rows.push(['버디 지급 총액', summary.birdieTotal, `총 ${summary.birdieCountSum}개`]);
   return rows;
 }
+// ---------- 마감 시 폴더 백업 ----------
+// A web page cannot write to a fixed disk path like C:\스크린골프 on its own —
+// there is no API for it, by design. The File System Access API is the only
+// route: the user grants one folder once, the handle is kept in IndexedDB
+// (handles survive a reload, unlike anything in localStorage), and every 마감
+// after that writes into <granted folder>/YYYY-MM/.
+//
+// This exists on Chromium desktop only. Safari and every iOS browser have no
+// such API, so each step below degrades to "no backup" rather than throwing —
+// closing the day must work on a phone whether or not a file gets written.
+const BACKUP_DB = 'sgledger-backup';
+const BACKUP_STORE = 'handles';
+const BACKUP_KEY = 'folder';
+function backupSupported(){
+  return typeof window !== 'undefined' && 'showDirectoryPicker' in window && window.isSecureContext;
+}
+function idbWithStore(mode, fn){
+  return new Promise((resolve, reject)=>{
+    const req = indexedDB.open(BACKUP_DB, 1);
+    req.onupgradeneeded = ()=>{ req.result.createObjectStore(BACKUP_STORE); };
+    req.onerror = ()=>reject(req.error);
+    req.onsuccess = ()=>{
+      const db = req.result;
+      let inner;
+      try{
+        const tx = db.transaction(BACKUP_STORE, mode);
+        inner = fn(tx.objectStore(BACKUP_STORE));
+        tx.oncomplete = ()=>{ db.close(); resolve(inner ? inner.result : undefined); };
+        tx.onerror = ()=>{ db.close(); reject(tx.error); };
+      }catch(e){ db.close(); reject(e); }
+    };
+  });
+}
+// Declarations rather than consts so the test harness can swap in a fake
+// directory handle — showDirectoryPicker needs a real click and a real folder.
+function getBackupFolder(){ return idbWithStore('readonly', s=>s.get(BACKUP_KEY)).catch(()=>null); }
+function putBackupFolder(h){ return idbWithStore('readwrite', s=>s.put(h, BACKUP_KEY)); }
+function dropBackupFolder(){ return idbWithStore('readwrite', s=>s.delete(BACKUP_KEY)); }
+
+// Granted once, but the browser can drop back to "prompt" between sessions;
+// re-asking only works while a click's user activation is still live.
+async function backupPermissionOk(dir, interactive){
+  if(!dir || typeof dir.queryPermission !== 'function') return false;
+  const opts = { mode:'readwrite' };
+  if(await dir.queryPermission(opts) === 'granted') return true;
+  if(!interactive) return false;
+  return await dir.requestPermission(opts) === 'granted';
+}
+async function chooseBackupFolder(){
+  if(!backupSupported()){
+    alert('이 브라우저에서는 폴더 자동 저장을 지원하지 않습니다.\n아이폰/사파리에는 해당 기능이 없으니, PC의 크롬 또는 엣지에서 지정해주세요.');
+    return;
+  }
+  try{
+    const dir = await window.showDirectoryPicker({ id:'sgledger-backup', mode:'readwrite' });
+    await putBackupFolder(dir);
+    state.backupFolder = dir.name;
+    render();
+    alert(`백업 폴더를 "${dir.name}" 으로 지정했습니다.\n앞으로 마감 처리를 하면 이 폴더 안에 월별 폴더(예: ${state.currentDate.slice(0,7)})를 만들어 일지를 저장합니다.`);
+  }catch(e){
+    if(e && e.name === 'AbortError') return;   // the user just closed the picker
+    alert('폴더를 지정하지 못했습니다: ' + ((e && e.message) || e));
+  }
+}
+async function forgetBackupFolder(){
+  if(!confirm('마감 시 자동 백업을 해제할까요?\n이미 저장된 파일은 그대로 남습니다.')) return;
+  await dropBackupFolder().catch(()=>{});
+  state.backupFolder = null;
+  render();
+}
+// Refreshes the label shown in the admin page. Never throws — an unsupported
+// browser simply has no folder.
+async function refreshBackupFolderName(){
+  if(!backupSupported()){ state.backupFolder = null; return; }
+  const dir = await getBackupFolder();
+  state.backupFolder = dir ? dir.name : null;
+}
+
+async function writeBackupFile(dirHandle, name, data){
+  const fh = await dirHandle.getFileHandle(name, { create:true });
+  const w = await fh.createWritable();
+  await w.write(data);
+  await w.close();
+}
+// Two files per day, deliberately: the .xlsx is the one a person opens and
+// reads, the .json is the only one that can put the day back exactly as it was
+// if the database is ever lost.
+async function writeDayBackup(dir, log){
+  const month = log.date.slice(0, 7);                      // 2026-08
+  const monthDir = await dir.getDirectoryHandle(month, { create:true });
+  const summary = computeSummary(log);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(buildDateSheetRows(log, summary)), log.date);
+  await writeBackupFile(monthDir, `${log.date} 일지.xlsx`, XLSX.write(wb, { bookType:'xlsx', type:'array' }));
+  await writeBackupFile(monthDir, `${log.date} 일지.json`, JSON.stringify(log, null, 2));
+  return `${dir.name}/${month}/${log.date} 일지`;
+}
+// Called from closeDay before it awaits anything else, so the permission
+// prompt still counts as coming from the click.
+async function backupTargetForClose(){
+  if(!backupSupported()) return null;
+  const dir = await getBackupFolder();
+  if(!dir) return null;
+  return (await backupPermissionOk(dir, true)) ? dir : { denied:true };
+}
+let lastBackup = null;   // {ok, text} — shown next to the 마감됨 badge
+async function runCloseBackup(dir, log){
+  if(!dir) return;                      // unsupported browser, or no folder set
+  if(dir.denied){
+    lastBackup = { ok:false, text:'폴더 접근 권한이 거부되어 백업하지 못했습니다.' };
+    render();
+    alert('일지는 마감됐지만 백업 폴더에 접근할 수 없어 파일을 저장하지 못했습니다.\n관리자 페이지에서 백업 폴더를 다시 지정해주세요.');
+    return;
+  }
+  try{
+    lastBackup = { ok:true, text: await writeDayBackup(dir, log) };
+    render();
+  }catch(e){
+    lastBackup = { ok:false, text:(e && e.message) || String(e) };
+    render();
+    // A backup that silently didn't happen is worse than no backup at all,
+    // because it is trusted.
+    alert('일지는 마감됐지만 백업 파일을 저장하지 못했습니다.\n\n' + lastBackup.text);
+  }
+}
+// Sits under the 마감 banner so the day's backup state is visible where the
+// close itself is, not buried in the admin page.
+function renderBackupNote(){
+  if(!lastBackup || !state.log || !state.log.closed) return '';
+  return lastBackup.ok
+    ? `<div class="backup-note">${icon('check')} 백업됨 — ${escHtml(lastBackup.text)}.xlsx / .json</div>`
+    : `<div class="backup-note failed">${icon('alert')} 백업하지 못했습니다 — ${escHtml(lastBackup.text)}
+         <button class="btn small" onclick="backupCurrentDayNow()">다시 백업</button></div>`;
+}
+// Re-runs the backup for the date on screen — the way to recover from a failed
+// or skipped one without having to un-close and re-close the day.
+async function backupCurrentDayNow(){
+  if(!state.log){ alert('먼저 일지를 불러와주세요.'); return; }
+  if(!backupSupported()){
+    alert('이 브라우저에서는 폴더 자동 저장을 지원하지 않습니다.\nPC의 크롬 또는 엣지에서 실행해주세요.');
+    return;
+  }
+  const dir = await getBackupFolder();
+  if(!dir){ alert('먼저 백업 폴더를 지정해주세요.'); return; }
+  if(!(await backupPermissionOk(dir, true))){ alert('폴더 접근 권한이 없어 저장하지 못했습니다.'); return; }
+  try{
+    const where = await writeDayBackup(dir, state.log);
+    lastBackup = { ok:true, text:where };
+    render();
+    alert('백업했습니다.\n' + where + '.xlsx / .json');
+  }catch(e){
+    alert('백업하지 못했습니다: ' + ((e && e.message) || e));
+  }
+}
+
 async function exportRangeToExcel(start, end){
   if(!start || !end){ alert('시작일과 종료일을 선택하세요.'); return; }
   if(start > end){ alert('종료일이 시작일보다 빠를 수 없습니다.'); return; }
@@ -2454,6 +2627,27 @@ function renderAdminView(){
         <input type="date" id="exportEnd" value="${state.currentDate}">
         <button class="btn" onclick="exportRangeToExcel(document.getElementById('exportStart').value, document.getElementById('exportEnd').value)">엑셀 다운로드</button>
       </div>
+    </div>
+
+    <div class="summary" style="margin-bottom:14px;">
+      <h2>${icon("save")} 마감 시 자동 백업</h2>
+      ${!backupSupported() ? `
+        <p style="font-size:12px;color:#888;margin:0;">
+          이 기기에서는 폴더 자동 저장을 지원하지 않습니다(아이폰·사파리에는 해당 기능이 없습니다).
+          PC의 크롬 또는 엣지에서 이 화면을 열어 폴더를 지정해주세요.
+        </p>
+      ` : `
+        <p style="font-size:12px;color:#888;margin:0 0 8px;">
+          폴더를 한 번 지정해두면, 마감 처리를 할 때마다 그 폴더 안에 월별 폴더(예: ${escHtml(state.currentDate.slice(0,7))})를 만들어
+          <b>일지.xlsx</b>(보기용)와 <b>일지.json</b>(복구용)을 저장합니다.
+        </p>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+          <span class="autosave-badge">현재 폴더: <b>${state.backupFolder ? escHtml(state.backupFolder) : '지정 안 됨'}</b></span>
+          <button class="btn" onclick="chooseBackupFolder()">${state.backupFolder ? '폴더 변경' : '폴더 지정'}</button>
+          ${state.backupFolder ? `<button class="btn" onclick="backupCurrentDayNow()">${escHtml(state.currentDate)} 지금 백업</button>` : ''}
+          ${state.backupFolder ? `<button class="btn danger" onclick="forgetBackupFolder()">해제</button>` : ''}
+        </div>
+      `}
     </div>
 
     <div class="summary" style="margin-bottom:14px;">
